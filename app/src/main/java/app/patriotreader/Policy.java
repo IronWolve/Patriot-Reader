@@ -55,7 +55,7 @@ public final class Policy {
         String h=URI.create(value).getHost();
         return directMedia(value)||h.equals("media.scored.co") || h.equals("img.scored.co") || h.equals("media.patriots.win")
             || h.equals("img.patriots.win") || h.equals("cdn.videy.co") || h.equals("preview.redd.it") || h.equals("i.redd.it")
-            || h.equals("pbs.twimg.com") || h.equals("video.twimg.com") || h.equals("i.ytimg.com");
+            || h.equals("pbs.twimg.com") || h.equals("video.twimg.com") || h.equals("i.ytimg.com") || h.equals("static-assets-1.truthsocial.com");
     }
     public static boolean embedDocument(String value){
         if(!https(value))return false;URI u=URI.create(value);

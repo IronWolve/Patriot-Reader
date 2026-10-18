@@ -24,9 +24,11 @@ public final class MainActivity extends Activity {
     private WebMessagePort port;
     private ConnectivityManager.NetworkCallback networkCallback;
     private final ExecutorService workers=Executors.newFixedThreadPool(3);
+    private static final ExecutorService settingsWrites=Executors.newSingleThreadExecutor();
+    private final RequestGate requestGate=new RequestGate();
     private final Handler main=new Handler(Looper.getMainLooper());
     private Vault vault; private ApiClient api; private CacheStore cache;
-    private String pendingPickerId, pendingExportId; private JSONObject pendingExport;
+    private String pendingPickerId, pendingExportId,pendingUploadUser; private JSONObject pendingExport;
     private View fullScreen; private WebChromeClient.CustomViewCallback fullScreenCallback;
     private String websiteRequestId;
     private boolean loginMode, loginProbeBusy, activityPaused;
@@ -41,6 +43,7 @@ public final class MainActivity extends Activity {
 
     @Override public void onCreate(Bundle state){
         super.onCreate(state);
+        recoverFileOperation();
         WebView.setWebContentsDebuggingEnabled(false);
         getWindow().setStatusBarColor(Color.rgb(21,23,25));getWindow().setNavigationBarColor(Color.rgb(21,23,25));
         root=new FrameLayout(this);root.setBackgroundColor(Color.rgb(21,23,25));
@@ -69,7 +72,7 @@ public final class MainActivity extends Activity {
                 if(Policy.ORIGIN.equals(req.getUrl().getScheme()+"://"+req.getUrl().getHost()))return false;
                 if(req.isForMainFrame())external(req.getUrl().toString());return true;
             }
-            @Override public void onPageStarted(WebView view,String url,android.graphics.Bitmap icon){if(port!=null){port.close();port=null;}}
+            @Override public void onPageStarted(WebView view,String url,android.graphics.Bitmap icon){requestGate.reset();if(port!=null){port.close();port=null;}}
             @Override public void onPageFinished(WebView view,String url){
                 if(!url.equals(Policy.ORIGIN+"/index.html"))return;
                 WebMessagePort[] ports=reader.createWebMessageChannel();port=ports[0];
@@ -119,6 +122,7 @@ public final class MainActivity extends Activity {
     private JSONObject bootstrap()throws Exception{
         JSONObject account=vault.read();ConnectivityManager cm=(ConnectivityManager)getSystemService(CONNECTIVITY_SERVICE);
         return new JSONObject().put("settings",settings()).put("appVersion",getPackageManager().getPackageInfo(getPackageName(),0).versionName).put("username",account.optString("username",""))
+            .put("sessionNeedsReset",vault.needsReset()).put("notice",getSharedPreferences("operations",0).getString("notice",""))
             .put("metered",cm.isActiveNetworkMetered()).put("cacheBytes",cache.size()).put("downloads",downloads())
             .put("systemDark",(getResources().getConfiguration().uiMode&Configuration.UI_MODE_NIGHT_MASK)==Configuration.UI_MODE_NIGHT_YES);
     }
@@ -126,12 +130,15 @@ public final class MainActivity extends Activity {
         if(text==null||text.length()>1024*1024)return;
         String requestId=null;
         try{
-            JSONObject req=new JSONObject(text);String id=req.getString("id"),op=req.getString("op");JSONObject args=req.optJSONObject("args");final JSONObject a=args==null?new JSONObject():args;
+            JSONObject req=new JSONObject(text);String id=requestGate.bind(req.getString("id")),op=req.getString("op");JSONObject args=req.optJSONObject("args");final JSONObject a=args==null?new JSONObject():args;
             requestId=id;
+            if(op.equals("copyText")){String value=a.getString("text");if(value.length()>500000)throw new IOException("Too much text to copy at once. Keep the app open, free storage and use Retry save.");((ClipboardManager)getSystemService(CLIPBOARD_SERVICE)).setPrimaryClip(ClipData.newPlainText("Patriot Reader recovery",value));reply(id,new JSONObject(),null);return;}
+            if(op.equals("dismissNotice")){getSharedPreferences("operations",0).edit().remove("notice").commit();reply(id,new JSONObject(),null);return;}
+            if(op.equals("settings")){settingsWrites.execute(()->{try{if(!getSharedPreferences("reader",0).edit().putString("settings",a.toString()).commit())throw new IOException("Could not save settings. Please retry.");cache.setLimit(Math.max(16,Math.min(256,a.optInt("cacheMb",64)))*1024L*1024L);main.post(()->{if(!isDestroyed())reader.getSettings().setMediaPlaybackRequiresUserGesture(!a.optBoolean("autoplay",false));});reply(id,a,null);}catch(Exception e){reply(id,null,safeError(e));}});return;}
             if(op.equals("exit")){moveTaskToBack(true);reply(id,new JSONObject(),null);return;}
             if(op.equals("openDownload")){openDownload(a.getLong("downloadId"));reply(id,new JSONObject(),null);return;}
             if(op.equals("login")||op.equals("website")){openWebsite(op.equals("login")?Policy.SITE+"/login":a.optString("url",Policy.SITE),id,op.equals("login"));return;}
-            if(op.equals("upload")){chooseUpload(id);return;}
+            if(op.equals("upload")){chooseUpload(id,a.optString("expectedUser",""));return;}
             if(op.equals("export")||op.equals("extract")){export(id,a.put("extract",op.equals("extract")));return;}
             if(op.equals("openX")){openX(a.optString("url"));reply(id,new JSONObject(),null);return;}
             if(op.equals("external")){external(a.optString("url"));reply(id,new JSONObject(),null);return;}
@@ -140,9 +147,9 @@ public final class MainActivity extends Activity {
                 Object result;
                 switch(op){
                     case "bootstrap":result=bootstrap();break;
-                    case "api":result=api.call(a.optString("method","GET"),a.getString("path"),a.optJSONObject("params")==null?new JSONObject():a.getJSONObject("params"));break;
-                    case "settings":getSharedPreferences("reader",0).edit().putString("settings",a.toString()).commit();cache.setLimit(Math.max(16,Math.min(256,a.optInt("cacheMb",64)))*1024L*1024L);main.post(()->reader.getSettings().setMediaPlaybackRequiresUserGesture(!a.optBoolean("autoplay",false)));result=a;break;
+                    case "api":result=api.call(a.optString("method","GET"),a.getString("path"),a.optJSONObject("params")==null?new JSONObject():a.getJSONObject("params"),a.has("expectedUser")?a.getString("expectedUser"):null);break;
                     case "rumbleEmbed":result=api.rumbleEmbed(a.getString("url"));break;
+                    case "truthPost":result=api.truthPost(a.getString("id"));break;
                     case "cacheInfo":result=new JSONObject().put("bytes",cache.size());break;
                     case "clearCache":cache.clear();result=new JSONObject().put("bytes",0);break;
                     case "logout":vault.clear();main.post(()->{CookieManager.getInstance().removeAllCookies(null);WebStorage.getInstance().deleteOrigin(Policy.SITE);});result=new JSONObject();break;
@@ -156,7 +163,7 @@ public final class MainActivity extends Activity {
         }catch(Exception error){if(requestId!=null)reply(requestId,null,safeError(error));}
     }
     private String safeError(Exception e){String m=e.getMessage();if(m==null||m.length()>300)return "The operation failed. Please retry.";return m.replaceAll("am_[A-Za-z0-9_-]+","[redacted]");}
-    private void reply(String id,Object value,String error){main.post(()->{try{if(port!=null)port.postMessage(new WebMessage(new JSONObject().put("id",id).put("result",value==null?JSONObject.NULL:value).put("error",error==null?JSONObject.NULL:error).toString()));}catch(Exception ignored){}});}
+    private void reply(String id,Object value,String error){main.post(()->{try{String current=requestGate.currentId(id);if(port!=null&&current!=null)port.postMessage(new WebMessage(new JSONObject().put("id",current).put("result",value==null?JSONObject.NULL:value).put("error",error==null?JSONObject.NULL:error).toString()));}catch(Exception ignored){}});}
     private void event(String name,Object value){main.post(()->{try{if(port!=null)port.postMessage(new WebMessage(new JSONObject().put("event",name).put("data",value).toString()));}catch(Exception ignored){}});}
     private void openWebsite(String url,String requestId,boolean forLogin){
         if(!(forLogin?Policy.site(url):Policy.https(url))){if(requestId!=null)reply(requestId,null,"Unsupported website address.");return;}
@@ -209,10 +216,21 @@ public final class MainActivity extends Activity {
     }
     private void loginFailed(WebView view,long generation){if(websiteGeneration!=generation)return;loginProbeBusy=false;nextLoginAttempt=SystemClock.uptimeMillis()+10000;if(currentLogin(view,generation))websiteStatus.setText("Couldn’t confirm sign-in. Retrying…");}
     private void closeWebsite(){websiteGeneration++;loginMode=false;loginProbeBusy=false;main.removeCallbacks(signInPoll);if(website!=null){website.stopLoading();website.destroy();website=null;}if(websitePanel!=null){root.removeView(websitePanel);websitePanel=null;}websiteStatus=null;CookieManager.getInstance().flush();if(websiteRequestId!=null){reply(websiteRequestId,new JSONObject(),null);websiteRequestId=null;}}
-    private void chooseUpload(String id){
-        if(pendingPickerId!=null){reply(id,null,"A file picker is already open.");return;}pendingPickerId=id;
+    private void notice(String message){getSharedPreferences("operations",0).edit().putString("notice",message).commit();event("notice",message);}
+    private void pendingOperation(String kind)throws IOException{if(!getSharedPreferences("operations",0).edit().putString("pending",kind).commit())throw new IOException("Could not save the pending file operation. Please retry.");}
+    private boolean clearPendingOperation(){return getSharedPreferences("operations",0).edit().remove("pending").remove("source").remove("destination").commit();}
+    private void recoverFileOperation(){
+        android.content.SharedPreferences prefs=getSharedPreferences("operations",0);String pending=prefs.getString("pending","");
+        if(pending.equals("export-writing")){
+            String destination=prefs.getString("destination",""),source=prefs.getString("source","");pendingExportId="recovering";
+            workers.execute(()->{boolean clean=destination.isEmpty()||destination.equals(source)||removeCreatedDocument(Uri.parse(destination));clearPendingOperation();notice(clean?"An interrupted save was cleaned up. The original download is preserved; choose Save copy again.":"A save was interrupted. The original download is preserved, but an incomplete output may remain in Files.");main.post(()->pendingExportId=null);});
+        }else if(!pending.isEmpty())notice("File selection was interrupted. Choose the file or destination again; saved drafts are preserved.");
+    }
+    private void chooseUpload(String id,String expectedUser)throws Exception{
+        if(pendingPickerId!=null||pendingExportId!=null){reply(id,null,"A file picker is already open.");return;}
+        pendingOperation("upload");pendingPickerId=id;pendingUploadUser=expectedUser;
         Intent intent=new Intent(Intent.ACTION_OPEN_DOCUMENT).setType("*/*").addCategory(Intent.CATEGORY_OPENABLE).putExtra(Intent.EXTRA_MIME_TYPES,new String[]{"image/jpeg","image/png","image/gif","image/webp","video/mp4"});
-        startActivityForResult(intent,PICK_UPLOAD);
+        try{startActivityForResult(intent,PICK_UPLOAD);}catch(Exception e){pendingPickerId=null;pendingUploadUser=null;clearPendingOperation();throw e;}
     }
     private DownloadManager dm(){return (DownloadManager)getSystemService(DOWNLOAD_SERVICE);}
     private synchronized JSONObject download(JSONObject a)throws Exception {
@@ -258,42 +276,84 @@ public final class MainActivity extends Activity {
         catch(ActivityNotFoundException e){throw new IOException("No app is available to open this file. Try Share or Save copy.");}
     }
     private void export(String id,JSONObject a)throws Exception {
-        long downloadId=a.getLong("downloadId");if(!downloadIds().contains(downloadId)||dm().getUriForDownloadedFile(downloadId)==null)throw new IOException("Download the file first.");
-        if(pendingExportId!=null)throw new IOException("A save dialog is already open.");pendingExportId=id;pendingExport=a;
-        String mime=a.optBoolean("extract")?"audio/mp4":dm().getMimeTypeForDownloadedFile(downloadId);if(mime==null)mime="application/octet-stream";
-        startActivityForResult(new Intent(Intent.ACTION_CREATE_DOCUMENT).addCategory(Intent.CATEGORY_OPENABLE).setType(mime).putExtra(Intent.EXTRA_TITLE,a.optBoolean("extract")?"audio.m4a":Policy.filename(a.optString("name","media"))),EXPORT);
+        long downloadId=a.getLong("downloadId");Uri source=dm().getUriForDownloadedFile(downloadId);
+        if(!downloadIds().contains(downloadId)||source==null)throw new IOException("Download the file first.");
+        if(pendingExportId!=null||pendingPickerId!=null)throw new IOException("A file picker is already open.");pendingExportId=id;pendingExport=a;
+        workers.execute(()->{try{
+            if(a.optBoolean("extract"))verifyAudio(source);
+            main.post(()->{try{
+                if(requestGate.currentId(id)==null){pendingExportId=null;pendingExport=null;return;}
+                pendingOperation("export:"+source);String mime=a.optBoolean("extract")?"audio/mp4":dm().getMimeTypeForDownloadedFile(downloadId);if(mime==null)mime="application/octet-stream";
+                startActivityForResult(new Intent(Intent.ACTION_CREATE_DOCUMENT).addCategory(Intent.CATEGORY_OPENABLE).setType(mime).putExtra(Intent.EXTRA_TITLE,a.optBoolean("extract")?"audio.m4a":Policy.filename(a.optString("name","media"))),EXPORT);
+            }catch(Exception e){pendingExportId=null;pendingExport=null;clearPendingOperation();reply(id,null,safeError(e));}});
+        }catch(Exception e){main.post(()->{pendingExportId=null;pendingExport=null;reply(id,null,safeError(e));});}});
+    }
+    private boolean removeCreatedDocument(Uri uri){
+        if(uri==null)return true;try{return android.provider.DocumentsContract.deleteDocument(getContentResolver(),uri);}catch(Exception ignored){return false;}
     }
     @Override protected void onActivityResult(int request,int result,Intent data){
         super.onActivityResult(request,result,data);
-        if(request==PICK_UPLOAD){String id=pendingPickerId;pendingPickerId=null;if(id==null)return;if(result!=RESULT_OK||data==null){reply(id,null,"File selection cancelled");return;}
-            Uri uri=data.getData();String mime=getContentResolver().getType(uri);String name="upload";long size=-1;
-            try(Cursor c=getContentResolver().query(uri,null,null,null,null)){if(c!=null&&c.moveToFirst()){name=c.getString(c.getColumnIndexOrThrow(OpenableColumns.DISPLAY_NAME));int col=c.getColumnIndex(OpenableColumns.SIZE);if(col>=0&&!c.isNull(col))size=c.getLong(col);}}
-            final String filename=name,kind=mime==null?"application/octet-stream":mime;
-            long max=kind.equals("video/mp4")||kind.equals("image/gif")?100L*1024*1024:12L*1024*1024;
-            if(size<0||size>max){reply(id,null,"Choose a local file within the site's size limit (12 MB images; 100 MB GIF/MP4).");return;}
-            new AlertDialog.Builder(this).setTitle("Upload media?").setMessage("Upload "+filename+" to "+(kind.equals("video/mp4")?"Videy":"Scored")+" for your post?")
-                .setNegativeButton("Cancel",(d,w)->reply(id,null,"Upload cancelled"))
-                .setPositiveButton("Upload",(d,w)->workers.execute(()->{try{reply(id,api.upload(this,uri,filename,kind),null);}catch(Exception e){reply(id,null,safeError(e));}})).setOnCancelListener(d->reply(id,null,"Upload cancelled")).show();
-        }else if(request==EXPORT){String id=pendingExportId;JSONObject a=pendingExport;pendingExportId=null;pendingExport=null;if(id==null)return;
-            if(result!=RESULT_OK||data==null){reply(id,null,"Save cancelled");return;}Uri destination=data.getData();workers.execute(()->{try{
-                Uri source=dm().getUriForDownloadedFile(a.getLong("downloadId"));if(a.optBoolean("extract"))extractAudio(source,destination);
-                else try(InputStream in=getContentResolver().openInputStream(source);OutputStream out=getContentResolver().openOutputStream(destination,"w")){byte[] b=new byte[65536];int n;while((n=in.read(b))!=-1)out.write(b,0,n);}
+        if(request!=PICK_UPLOAD&&request!=EXPORT)return;
+        String priorOperation=getSharedPreferences("operations",0).getString("pending","");
+        if(request==PICK_UPLOAD)clearPendingOperation();
+        if(request==PICK_UPLOAD){
+            String id=pendingPickerId,user=pendingUploadUser;pendingPickerId=null;pendingUploadUser=null;
+            if(id==null||requestGate.currentId(id)==null){notice("File selection was interrupted. Choose the file again; your draft is preserved.");return;}
+            if(result!=RESULT_OK||data==null||data.getData()==null){reply(id,null,"File selection cancelled");return;}
+            try{
+                Uri uri=data.getData();String mime=getContentResolver().getType(uri),name="upload";long size=-1;
+                try(Cursor c=getContentResolver().query(uri,null,null,null,null)){if(c!=null&&c.moveToFirst()){name=c.getString(c.getColumnIndexOrThrow(OpenableColumns.DISPLAY_NAME));int col=c.getColumnIndex(OpenableColumns.SIZE);if(col>=0&&!c.isNull(col))size=c.getLong(col);}}
+                final String filename=name,kind=mime==null?"application/octet-stream":mime;
+                long max=kind.equals("video/mp4")||kind.equals("image/gif")?100L*1024*1024:12L*1024*1024;
+                if(size<0||size>max){reply(id,null,"Choose a local file within the site's size limit (12 MB images; 100 MB GIF/MP4).");return;}
+                new AlertDialog.Builder(this).setTitle("Upload media?").setMessage("Upload "+filename+" to "+(kind.equals("video/mp4")?"Videy":"Scored")+" for your post?")
+                    .setNegativeButton("Cancel",(d,w)->reply(id,null,"Upload cancelled"))
+                    .setPositiveButton("Upload",(d,w)->workers.execute(()->{try{reply(id,api.upload(this,uri,filename,kind,user),null);}catch(Exception e){reply(id,null,safeError(e));}})).setOnCancelListener(d->reply(id,null,"Upload cancelled")).show();
+            }catch(Exception e){reply(id,null,safeError(e));}
+        }else{
+            String id=pendingExportId;JSONObject a=pendingExport;
+            final Uri destination=data==null?null:data.getData();
+            if(id==null||a==null||requestGate.currentId(id)==null){
+                pendingExportId=null;pendingExport=null;clearPendingOperation();
+                workers.execute(()->{boolean protectedSource=destination!=null&&priorOperation.equals("export:"+destination);boolean clean=result!=RESULT_OK||protectedSource||removeCreatedDocument(destination);notice("Save was interrupted. Choose the destination again."+(clean?"":" An incomplete file remains; remove it in Files."));});return;
+            }
+            if(result!=RESULT_OK||destination==null){pendingExportId=null;pendingExport=null;clearPendingOperation();reply(id,null,"Save cancelled");return;}
+            workers.execute(()->{Uri source=dm().getUriForDownloadedFile(a.optLong("downloadId"));boolean protectedSource=destination.equals(source);try{
+                if(source==null)throw new IOException("The original download is no longer available.");
+                if(source.equals(destination))throw new IOException("Choose a different destination from the original download.");
+                try{getContentResolver().takePersistableUriPermission(destination,Intent.FLAG_GRANT_READ_URI_PERMISSION|Intent.FLAG_GRANT_WRITE_URI_PERMISSION);}catch(SecurityException ignored){}
+                if(!getSharedPreferences("operations",0).edit().putString("pending","export-writing").putString("source",source.toString()).putString("destination",destination.toString()).commit())throw new IOException("Could not save recovery information. The original download is preserved.");
+                if(a.optBoolean("extract"))extractAudio(source,destination);
+                else try(InputStream in=getContentResolver().openInputStream(source);OutputStream out=getContentResolver().openOutputStream(destination,"wt")){if(in==null||out==null)throw new IOException("Could not open the selected files.");byte[] b=new byte[65536];int n;while((n=in.read(b))!=-1)out.write(b,0,n);}
+                if(!clearPendingOperation())throw new IOException("Could not finish saving the recovery record. The original download is preserved.");
                 reply(id,new JSONObject().put("saved",true),null);
-            }catch(Exception e){reply(id,null,safeError(e));}});
+            }catch(Exception e){boolean clean=protectedSource||removeCreatedDocument(destination);reply(id,null,safeError(e)+(clean?"":" An incomplete file remains at the selected destination; remove it in Files."));}finally{clearPendingOperation();main.post(()->{pendingExportId=null;pendingExport=null;});}});
         }
+    }
+    private int audioTrack(android.media.MediaExtractor extractor){
+        for(int i=0;i<extractor.getTrackCount();i++)if("audio/mp4a-latm".equals(extractor.getTrackFormat(i).getString(android.media.MediaFormat.KEY_MIME)))return i;return -1;
+    }
+    private void verifyAudio(Uri source)throws Exception{
+        android.media.MediaExtractor extractor=new android.media.MediaExtractor();
+        try(android.content.res.AssetFileDescriptor input=getContentResolver().openAssetFileDescriptor(source,"r")){
+            if(input==null)throw new IOException("Could not open the downloaded video.");extractor.setDataSource(input.getFileDescriptor(),input.getStartOffset(),input.getLength());
+            if(audioTrack(extractor)<0)throw new IOException("This video has no supported AAC audio track. No output file was created.");
+        }finally{extractor.release();}
     }
     private void extractAudio(Uri source,Uri destination)throws Exception {
         android.media.MediaExtractor extractor=new android.media.MediaExtractor();android.media.MediaMuxer muxer=null;boolean started=false;
-        try(android.content.res.AssetFileDescriptor input=getContentResolver().openAssetFileDescriptor(source,"r");ParcelFileDescriptor output=getContentResolver().openFileDescriptor(destination,"rw")){
-            extractor.setDataSource(input.getFileDescriptor(),input.getStartOffset(),input.getLength());int track=-1;
-            for(int i=0;i<extractor.getTrackCount();i++){String mime=extractor.getTrackFormat(i).getString(android.media.MediaFormat.KEY_MIME);if("audio/mp4a-latm".equals(mime)){track=i;break;}}
+        try(android.content.res.AssetFileDescriptor input=getContentResolver().openAssetFileDescriptor(source,"r")){
+            if(input==null)throw new IOException("Could not open the downloaded video.");extractor.setDataSource(input.getFileDescriptor(),input.getStartOffset(),input.getLength());int track=audioTrack(extractor);
             if(track<0)throw new IOException("This video has no supported AAC audio track. The original video is preserved.");
-            extractor.selectTrack(track);muxer=new android.media.MediaMuxer(output.getFileDescriptor(),android.media.MediaMuxer.OutputFormat.MUXER_OUTPUT_MPEG_4);
-            int target=muxer.addTrack(extractor.getTrackFormat(track));muxer.start();started=true;
-            java.nio.ByteBuffer buffer=java.nio.ByteBuffer.allocate(1024*1024);android.media.MediaCodec.BufferInfo info=new android.media.MediaCodec.BufferInfo();
-            while(true){int n=extractor.readSampleData(buffer,0);if(n<0)break;info.set(0,n,extractor.getSampleTime(),extractor.getSampleFlags());muxer.writeSampleData(target,buffer,info);extractor.advance();}
-            muxer.stop();started=false;
-        }finally{extractor.release();if(muxer!=null){if(started)muxer.stop();muxer.release();}}
+            extractor.selectTrack(track);
+            try(ParcelFileDescriptor output=getContentResolver().openFileDescriptor(destination,"rwt")){
+                if(output==null)throw new IOException("Could not open the output file.");muxer=new android.media.MediaMuxer(output.getFileDescriptor(),android.media.MediaMuxer.OutputFormat.MUXER_OUTPUT_MPEG_4);
+                int target=muxer.addTrack(extractor.getTrackFormat(track));muxer.start();started=true;
+                java.nio.ByteBuffer buffer=java.nio.ByteBuffer.allocate(1024*1024);android.media.MediaCodec.BufferInfo info=new android.media.MediaCodec.BufferInfo();
+                while(true){int n=extractor.readSampleData(buffer,0);if(n<0)break;info.set(0,n,extractor.getSampleTime(),extractor.getSampleFlags());muxer.writeSampleData(target,buffer,info);extractor.advance();}
+                muxer.stop();started=false;
+            }
+        }finally{extractor.release();if(muxer!=null){if(started)try{muxer.stop();}catch(Exception ignored){}muxer.release();}}
     }
     private void openX(String url){
         if(!Policy.xPost(url))return;
@@ -307,5 +367,5 @@ public final class MainActivity extends Activity {
     @Override protected void onResume(){super.onResume();activityPaused=false;if(loginMode){main.removeCallbacks(signInPoll);main.post(signInPoll);}}
     @Override protected void onPause(){activityPaused=true;main.removeCallbacks(signInPoll);super.onPause();if(reader!=null)reader.evaluateJavascript("window.ReaderPause && window.ReaderPause()",null);CookieManager.getInstance().flush();}
     @Override public void onConfigurationChanged(Configuration c){super.onConfigurationChanged(c);event("systemTheme",(c.uiMode&Configuration.UI_MODE_NIGHT_MASK)==Configuration.UI_MODE_NIGHT_YES);}
-    @Override protected void onDestroy(){websiteGeneration++;loginMode=false;main.removeCallbacks(signInPoll);if(networkCallback!=null)((ConnectivityManager)getSystemService(CONNECTIVITY_SERVICE)).unregisterNetworkCallback(networkCallback);if(port!=null)port.close();if(website!=null)website.destroy();if(reader!=null)reader.destroy();workers.shutdown();super.onDestroy();}
+    @Override protected void onDestroy(){websiteGeneration++;loginMode=false;main.removeCallbacks(signInPoll);if(networkCallback!=null)((ConnectivityManager)getSystemService(CONNECTIVITY_SERVICE)).unregisterNetworkCallback(networkCallback);if(port!=null)port.close();if(website!=null)website.destroy();if(reader!=null)reader.destroy();workers.shutdown();requestGate.reset();super.onDestroy();}
 }

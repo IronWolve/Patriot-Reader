@@ -1,13 +1,13 @@
 'use strict';
 (() => {
   const C=ReaderCore, $=s=>document.querySelector(s), main=$('#main');
-  const state={settings:C.normalizeSettings({}),username:'',metered:true,systemDark:true,appVersion:'',page:'feed',sort:'hot',feed:[],more:false,stack:[],sequence:0};
-  const pending=new Map();let port=null,requestCounter=0,readyResolve,toastTimer,downloadTimer,lastFocus,refreshDownloads,pauseObserver,feedLoad=0,feedBusy=false,dropdownAnchor,imageViewer;
+  const state={settings:C.normalizeSettings({}),username:'',metered:true,systemDark:true,appVersion:'',page:'feed',sort:'hot',feed:[],more:false,stack:[],sequence:0,accountEpoch:0,sessionNeedsReset:false};
+  const pending=new Map();let port=null,requestCounter=0,readyResolve,toastTimer,downloadTimer,lastFocus,refreshDownloads,pauseObserver,feedLoad=0,feedBusy=false,dropdownAnchor,imageViewer,sheetGeneration=0,searchGeneration=0,restoreCleanup,activeListCleanup;
   const ready=new Promise(resolve=>readyResolve=resolve);
   function el(tag,attrs={},...children){const n=document.createElement(tag);for(const [k,v] of Object.entries(attrs)){
     if(k==='class')n.className=v;else if(k.startsWith('on'))n.addEventListener(k.slice(2),v);else if(k==='text')n.textContent=v;else if(v!==undefined&&v!==null&&v!==false)n.setAttribute(k,v===true?'':v);
   }for(const child of children.flat())if(child!==null&&child!==undefined)n.append(child instanceof Node?child:document.createTextNode(String(child)));return n;}
-  function releaseMedia(target){target.querySelectorAll('video,audio').forEach(media=>{pauseObserver?.unobserve(media);media.pause();});target.querySelectorAll('iframe').forEach(frame=>{embedObserver.unobserve(frame);const entry=embeddedPlayers.get(frame);if(entry)clearInterval(entry.timer);embeddedPlayers.delete(frame);});}
+  function releaseMedia(target){target.querySelectorAll('.truth').forEach(card=>truthObserver.unobserve(card));target.querySelectorAll('video,audio').forEach(media=>{pauseObserver?.unobserve(media);media.pause();});target.querySelectorAll('iframe').forEach(frame=>{embedObserver.unobserve(frame);const entry=embeddedPlayers.get(frame);if(entry)clearInterval(entry.timer);embeddedPlayers.delete(frame);});}
   function replace(target,...children){releaseMedia(target);target.replaceChildren(...children.filter(c=>c!==null&&c!==undefined));}
   const button=(text,handler,cls='')=>el('button',{type:'button',class:cls,onclick:handler},text);
   const text=(tag,value,cls='')=>el(tag,{class:cls},value);
@@ -30,8 +30,8 @@
   for(const n of document.querySelectorAll('#nav button'))n.prepend(icon({feed:'home',search:'search',compose:'plus',inbox:'inbox',profile:'user'}[n.dataset.page]));
   function toast(message){clearTimeout(toastTimer);$('#toast').textContent=message;$('#toast').hidden=false;toastTimer=setTimeout(()=>$('#toast').hidden=true,5500);}
   function syncModalScroll(){document.documentElement.classList.toggle('modal-open',!!document.querySelector('dialog[open]'));}
-  function sheet(title,content,layout='dialog'){imageViewer?.destroy();imageViewer=null;lastFocus=document.activeElement;$('#sheet').classList.toggle('image-dialog',layout==='image');$('#sheet').classList.toggle('compact-dialog',layout==='dialog');$('#sheet-title').textContent=title;$('#sheet-title').title=title;replace($('#sheet-body'),content);if(!$('#sheet').open)$('#sheet').showModal();syncModalScroll();}
-  function closeSheet(){imageViewer?.destroy();imageViewer=null;releaseMedia($('#sheet-body'));$('#sheet-body').replaceChildren();$('#sheet').close();syncModalScroll();lastFocus?.focus?.();}
+  function sheet(title,content,layout='dialog'){++sheetGeneration;imageViewer?.destroy();imageViewer=null;lastFocus=document.activeElement;$('#sheet').classList.toggle('image-dialog',layout==='image');$('#sheet').classList.toggle('compact-dialog',layout==='dialog');$('#sheet-title').textContent=title;$('#sheet-title').title=title;replace($('#sheet-body'),content);if(!$('#sheet').open)$('#sheet').showModal();syncModalScroll();return sheetGeneration;}
+  function closeSheet(){++sheetGeneration;imageViewer?.destroy();imageViewer=null;releaseMedia($('#sheet-body'));$('#sheet-body').replaceChildren();$('#sheet').close();syncModalScroll();lastFocus?.focus?.();}
   function closeDropdown(){if($('#dropdown').open)$('#dropdown').close();$('#dropdown').replaceChildren();dropdownAnchor?.focus?.();dropdownAnchor=null;syncModalScroll();}
   function openDropdown(title,content,anchor,rows){
     closeDropdown();dropdownAnchor=anchor;
@@ -52,7 +52,7 @@
   $('#sheet-close').onclick=closeSheet;
   $('#sheet').addEventListener('cancel',e=>{e.preventDefault();closeSheet();});
   $('#sheet').addEventListener('click',e=>{if(e.target===$('#sheet'))closeSheet();});
-  function receive(message){if(message.event){if(message.event==='account')accountChanged(message.data.username);if(message.event==='systemTheme'){state.systemDark=message.data;theme();}if(message.event==='metered'){state.metered=message.data;if(message.data)document.querySelectorAll('video[autoplay],audio[autoplay]').forEach(m=>{m.pause();m.autoplay=false;});}return;}
+  function receive(message){if(message.event){if(message.event==='notice')showNotice(message.data);if(message.event==='account')accountChanged(message.data.username);if(message.event==='systemTheme'){state.systemDark=message.data;theme();}if(message.event==='metered'){state.metered=message.data;if(message.data)document.querySelectorAll('video[autoplay],audio[autoplay]').forEach(m=>{m.pause();m.autoplay=false;});}return;}
     const job=pending.get(message.id);if(!job)return;pending.delete(message.id);clearTimeout(job.timer);message.error?job.reject(new Error(message.error)):job.resolve(message.result);}
   // Provider iframes must never replace the native channel. It is established
   // before bootstrap; no remote embed exists until after that handshake.
@@ -60,12 +60,28 @@
   if(window.ReaderPreview)readyResolve();
   async function rpc(op,args={}){await ready;if(window.ReaderPreview)return window.ReaderPreview(op,args);return new Promise((resolve,reject)=>{
       const id=String(++requestCounter),timer=setTimeout(()=>{pending.delete(id);reject(new Error('The request timed out. For posting, check your profile before retrying.'));},['login','website','export','extract','upload'].includes(op)?600000:65000);
-    pending.set(id,{resolve,reject,timer});port.postMessage(JSON.stringify({id,op,args}));});}
-  const api=(path,params={},method='GET')=>rpc('api',{path,params,method});
+    const payload=JSON.stringify({id,op,args});if(payload.length>1024*1024){clearTimeout(timer);reject(new Error('This request is too large. Keep unsaved text open and reduce its size before retrying.'));return;}pending.set(id,{resolve,reject,timer});try{port.postMessage(payload);}catch(error){pending.delete(id);clearTimeout(timer);reject(error);}});}
+  const api=(path,params={},method='GET',expectedUser=state.username)=>rpc('api',{path,params,method,expectedUser});
   async function action(fn,node){if(node?.disabled)return;try{if(node)node.disabled=true;return await fn();}catch(e){toast(e.message);}finally{if(node?.isConnected)node.disabled=false;}}
-  const ownKey=name=>`reader:${state.username.toLowerCase()||'guest'}:${name}`;
-  const readLocal=(key,fallback)=>{try{return JSON.parse(localStorage.getItem(key))??fallback;}catch{return fallback;}};
-  function remember(key,value){if(value===null)localStorage.removeItem(key);else localStorage.setItem(key,JSON.stringify(value));}
+  const ownKey=(name,user=state.username)=>`reader:${user.toLowerCase()||'guest'}:${name}`;
+  const store=C.createStore(localStorage),publishing=new Set();
+  const readLocal=(key,fallback)=>store.read(key,fallback);
+  function storageStatus(){
+    const warning=$('#storage-warning');warning.hidden=store.pending().length===0;
+    document.querySelectorAll('[data-draft-key]').forEach(n=>{n.textContent=store.pending().includes(n.dataset.draftKey)?'Not saved on this device — keep the app open.':(n.dataset.savedLabel||'Draft saved · Review before publishing');});
+  }
+  function remember(key,value){const saved=store.write(key,value);storageStatus();return saved;}
+  function durable(key,value){const previous=readLocal(key,null);if(!remember(key,value)){if(value===null&&previous!==null)remember(key,previous);throw new Error('Couldn’t save the publishing record. Keep the app open and retry saving before continuing.');}}
+  function clearRevision(key,revision){if(store.revision(key)===revision)remember(key,null);}
+  function retryStorage(){store.retry();storageStatus();}
+  $('#storage-retry').onclick=retryStorage;
+  async function copyRecovery(){const value=JSON.stringify(store.recovery(),null,2);if(value.length>500000)throw new Error('Too much unsaved data to copy at once. Keep the app open and use Retry save after making storage available.');await rpc('copyText',{text:value});toast('Unsaved data copied.');}
+  $('#storage-copy').onclick=()=>action(copyRecovery);
+  window.addEventListener('beforeunload',e=>{if(store.pending().length){e.preventDefault();e.returnValue='';}});
+  const ownsSheet=token=>$('#sheet').open&&sheetGeneration===token;
+  function accountContext(){const user=state.username,epoch=state.accountEpoch;return {user,current:()=>user===state.username&&epoch===state.accountEpoch};}
+  function showNotice(message){$('#recovery-notice').hidden=!message;$('#recovery-message').textContent=message||'';}
+  $('#recovery-dismiss').onclick=()=>action(async()=>{await rpc('dismissNotice');showNotice('');});
   // One device preference, independent of account, for direct media and YouTube.
   const storedSound=readLocal('reader:sound',{}),sound={volume:typeof storedSound.volume==='number'?Math.max(0,Math.min(1,storedSound.volume)):1,muted:storedSound.muted===true};
   const directSound=new WeakMap(),embeddedPlayers=new Map();
@@ -101,13 +117,21 @@
   });
   function theme(){const dark=state.settings.theme==='dark'||state.settings.theme==='system'&&state.systemDark;document.documentElement.dataset.theme=dark?'dark':'light';document.documentElement.style.setProperty('--font',state.settings.textSize+'px');}
   async function saveSettings(){state.settings=C.normalizeSettings(state.settings);theme();await rpc('settings',state.settings);}
-  function accountChanged(username){state.username=username||'';state.feed=[];state.stack=[];state.sequence++;navigate('feed',false);}
-  function navigation(page,push=true){closeDropdown();feedObserver.disconnect();feedBusy=false;feedLoad++;if(push)state.stack.push({page:state.page,scroll:window.scrollY,post:state.post,query:state.query,threadFocus:state.threadFocus});state.sequence++;state.page=page;clearTimeout(downloadTimer);downloadTimer=null;refreshDownloads=null;
-    $('#back').hidden=!state.stack.length;$('#subtitle').textContent=page==='feed'?'TheDonald':({compose:'New post',thread:'Discussion',profile:state.username||'Your account',downloads:'Downloads',settings:'Your preferences',inbox:'Inbox',search:'Search'}[page]||'TheDonald');
+  function accountChanged(username){state.accountEpoch++;state.sessionNeedsReset=false;state.username=username||'';state.feed=[];state.searchModel=null;state.profileModel=null;state.stack=[];state.sequence++;navigate('feed',false);}
+  function navigation(page,push=true){activeListCleanup?.();activeListCleanup=null;restoreCleanup?.();restoreCleanup=null;closeDropdown();feedObserver.disconnect();feedBusy=false;feedLoad++;if(push)state.stack.push({page:state.page,scroll:window.scrollY,post:state.post,query:state.query,threadFocus:state.threadFocus,anchor:scrollAnchor()});state.sequence++;state.page=page;clearTimeout(downloadTimer);downloadTimer=null;refreshDownloads=null;
+    $('#back').hidden=!state.stack.length;$('#subtitle').textContent=page==='feed'?'TheDonald':({compose:'New post',thread:'Discussion',profile:state.username||'Your account',downloads:'Downloads',saved:'Saved posts',settings:'Your preferences',inbox:'Inbox',search:'Search'}[page]||'TheDonald');
     document.querySelectorAll('#nav button').forEach(n=>{if(n.dataset.page===page)n.setAttribute('aria-current','page');else n.removeAttribute('aria-current');});window.scrollTo(0,0);}
-  function navigate(page,push=true){navigation(page,push);({feed:feedPage,search:searchPage,compose:composePage,profile:profilePage,settings:settingsPage,downloads:downloadsPage,inbox:inboxPage,thread:()=>threadPage(state.post)}[page]||feedPage)();}
-  function back(){if($('#dropdown').open){closeDropdown();return;}if($('#sheet').open){closeSheet();return;}const previous=state.stack.pop();if(previous){state.post=previous.post;state.query=previous.query;state.threadFocus=previous.threadFocus;navigate(previous.page,false);requestAnimationFrame(()=>window.scrollTo(0,previous.scroll));}
-    else if(state.page!=='feed')navigate('feed',false);else rpc('exit').catch(()=>{});}
+  function navigate(page,push=true){navigation(page,push);return ({feed:feedPage,search:searchPage,compose:composePage,profile:profilePage,settings:settingsPage,downloads:downloadsPage,saved:savedPage,inbox:inboxPage,thread:()=>threadPage(state.post)}[page]||feedPage)();}
+  function back(){if($('#dropdown').open){closeDropdown();return;}if($('#sheet').open){closeSheet();return;}const previous=state.stack.pop();if(previous){state.post=previous.post;state.query=previous.query;state.threadFocus=previous.threadFocus;state.returning=previous.page==='thread';const task=navigate(previous.page,false),seq=state.sequence;Promise.resolve(task).then(()=>{if(seq===state.sequence)restoreScroll(previous,seq);});}
+    else if(state.page!=='feed')navigate('feed',false);else if(store.pending().length)sheet('Changes are not saved',el('div',{},text('p','Keep the app open until saving succeeds, or copy the unsaved data before leaving.'),button('Retry saving',retryStorage),button('Copy unsaved data',()=>action(copyRecovery))));else rpc('exit').catch(()=>{});}
+  function scrollAnchor(){const nodes=[...main.querySelectorAll('[data-comment-id],[data-post-id]')],node=nodes.find(n=>n.getBoundingClientRect().bottom>54);return node?{kind:node.hasAttribute('data-comment-id')?'data-comment-id':'data-post-id',id:node.getAttribute(node.hasAttribute('data-comment-id')?'data-comment-id':'data-post-id'),top:node.getBoundingClientRect().top}:null;}
+  function restoreScroll(previous,seq){
+    let applying=false,frame=0;
+    const apply=()=>{frame=0;if(applying||seq!==state.sequence)return;applying=true;const anchor=previous.anchor,node=anchor&&[...main.querySelectorAll('['+anchor.kind+']')].find(n=>n.getAttribute(anchor.kind)===anchor.id);window.scrollTo(0,node?scrollY+node.getBoundingClientRect().top-anchor.top:previous.scroll);applying=false;};
+    const schedule=()=>{if(!frame)frame=requestAnimationFrame(apply);},observer=new ResizeObserver(schedule);observer.observe(main);main.addEventListener('load',schedule,true);
+    const stop=()=>{observer.disconnect();main.removeEventListener('load',schedule,true);for(const name of ['pointerdown','wheel','keydown'])window.removeEventListener(name,stop,true);cancelAnimationFrame(frame);};
+    for(const name of ['pointerdown','wheel','keydown'])window.addEventListener(name,stop,{capture:true,once:true});restoreCleanup=stop;requestAnimationFrame(apply);
+  }
   window.ReaderBack=back;$('#back').onclick=back;$('#downloads').onclick=()=>navigate('downloads');$('#settings').onclick=()=>navigate('settings');
   document.querySelectorAll('#nav button').forEach(n=>n.onclick=()=>{if(n.dataset.page!==state.page){state.stack=[];navigate(n.dataset.page,false);}});
   function loading(message='Loading…'){replace(main,text('div',message,'spinner'));}
@@ -163,7 +187,7 @@
   },node);}
   function voteControls(p,isPost=true){const up=iconButton('up','Upvote',e=>vote(p,0,isPost,e.currentTarget),'vote'),down=iconButton('down','Downvote',e=>vote(p,1,isPost,e.currentTarget),'vote');up.dataset.direction='0';down.dataset.direction='1';
     up.setAttribute('aria-pressed',String(p.vote_state===0));down.setAttribute('aria-pressed',String(p.vote_state===1));return [el('div',{class:'vote-group',role:'group','aria-label':'Vote','data-vote':p.vote_state??2},up,text('span',Number(p.score||0).toLocaleString(),'score'),down)];}
-  function postCard(p,detail=false){
+  function postCard(p,detail=false,bookmarkOwner=state.username){
     const m=C.media(p),card=el('article',{class:'post '+(detail||state.settings.layout==='cards'?'card':'compact'),'data-post-id':p.id});
     const title=detail?text('h1',p.title):button(p.title,()=>openPost(p),'post-title');
     const meta=el('div',{class:'meta'},text('span','u/'+p.author),p.author_flair_text?el('span',{class:'flair',title:'User flair'},C.cleanFlair(p.author_flair_text)):null,text('span',ago(p.created)),p.is_stickied?text('span','Pinned','pin'):null,p.domain?text('span',p.domain):null);
@@ -173,10 +197,10 @@
     }card.append(top);
     if(detail&&postText(p))card.append(richContent(p.content,p.raw_content));
     const embedded=C.preview(p);
-    if(['twitter','youtube','rumble','article'].includes(embedded.kind))card.append(linkPreview(embedded,p,detail));
+    if(['twitter','youtube','rumble','truth','article'].includes(embedded.kind))card.append(linkPreview(embedded,p,detail));
     else if((detail||state.settings.layout==='cards')&&m.kind!=='link')card.append(mediaView(m,p.title));
-    const saved=readLocal(ownKey('bookmarks'),[]).some(x=>x.id===p.id);
-    const save=iconButton('bookmark',saved?'Unsave post':'Save post',e=>{let list=readLocal(ownKey('bookmarks'),[]),wasSaved=list.some(x=>x.id===p.id);if(wasSaved)list=list.filter(x=>x.id!==p.id);else{list.unshift(p);list=list.slice(0,250);}e.currentTarget.setAttribute('aria-pressed',String(!wasSaved));e.currentTarget.setAttribute('aria-label',wasSaved?'Save post':'Unsave post');remember(ownKey('bookmarks'),list);},'action-icon save-post');save.setAttribute('aria-pressed',String(saved));
+    const saved=readLocal(ownKey('bookmarks',bookmarkOwner),[]).some(x=>x.id===p.id);
+    const save=iconButton('bookmark',saved?'Unsave post':'Save post',e=>{let list=readLocal(ownKey('bookmarks',bookmarkOwner),[]),wasSaved=list.some(x=>x.id===p.id);if(wasSaved)list=list.filter(x=>x.id!==p.id);else list.unshift(p);e.currentTarget.setAttribute('aria-pressed',String(!wasSaved));e.currentTarget.setAttribute('aria-label',wasSaved?'Save post':'Unsave post');remember(ownKey('bookmarks',bookmarkOwner),list);if(state.page==='saved')savedPage();},'action-icon save-post');save.setAttribute('aria-pressed',String(saved));
     const comments=button('',()=>{if(detail)scrollToComments();else openPost(p,'comments');},'comment-count');comments.setAttribute('aria-label',`${p.comments||0} comments`);comments.append(icon('comment'),text('span',Number(p.comments||0).toLocaleString()));
     const actions=el('div',{class:'actions post-actions'},...voteControls(p),comments,el('span',{class:'action-spacer'}),save,iconButton('more','Post actions',e=>postMenu(p,e.currentTarget),'action-icon'));
     card.append(actions);return card;
@@ -204,9 +228,47 @@
     if(!video)box.append(button('Open in X',()=>action(()=>rpc('openX',{url})),'original-link'));
     return box;
   }
+  const truthLoads=new WeakMap();
+  const truthObserver=new IntersectionObserver(entries=>{for(const entry of entries)if(entry.isIntersecting){truthObserver.unobserve(entry.target);truthLoads.get(entry.target)?.();}},{rootMargin:'300px 0px'});
+  function truthPreview(item){
+    const card=el('div',{class:'link-preview truth'}),body=el('div',{class:'truth-body'});
+    const open=()=>action(()=>rpc('external',{url:item.url}));
+    const original=()=>button('Open in Truth Social',open,'original-link');
+    const value=(v,fallback='')=>typeof v==='string'&&v.trim()?v:fallback;
+    let busy=false;
+    async function load(){
+      if(busy||!card.isConnected)return;busy=true;
+      replace(body,text('p','Loading Truth Social post…','muted truth-status'));replace(card,body,original());
+      try{
+        const result=await rpc('truthPost',{id:item.id});if(!card.isConnected)return;
+        const post=result.data;
+        if(!post||post.id!==item.id||!post.account||typeof post.content!=='string')throw new Error('Truth Social returned an unexpected post.');
+        const author=post.account,name=value(author.display_name,value(author.username,'Truth Social'));
+        const avatar=C.safeURL(author.avatar)?previewImage(author.avatar,'','tweet-avatar'):text('span',name.slice(0,1),'tweet-avatar initials');
+        const identity=el('div',{class:'tweet-identity'},text('strong',name),text('span',value(author.username)?'@'+author.username:'','muted'));
+        replace(body,el('div',{class:'tweet-author'},avatar,identity,text('span','Truth Social','provider-mark')),cachedNotice(result),richContent(post.content,'','truth-text'));
+        let hasPlayer=false;
+        for(const attachment of (Array.isArray(post.media_attachments)?post.media_attachments:[]).slice(0,8)){
+          const url=C.safeURL(attachment?.url);if(!url)continue;
+          const title=value(attachment.description,'Media from '+name),poster=C.safeURL(attachment.preview_url);
+          const kind=attachment.type==='image'?'image':['video','gifv'].includes(attachment.type)?'video':attachment.type==='audio'?'audio':'';
+          if(!kind)continue;
+          const dimensions=attachment.meta?.original;
+          body.append(mediaView({kind,url,poster,aspectRatio:dimensions?[dimensions.width,dimensions.height]:undefined},title,{label:'Open in Truth Social',open}));
+          if(kind!=='image')hasPlayer=true;
+        }
+        if(hasPlayer)card.querySelector(':scope > .original-link')?.remove();
+      }catch(error){
+        if(card.isConnected){replace(body,text('p','Couldn’t load this Truth Social post.','truth-status'),text('p',error.message,'muted truth-status'),button('Retry',load,'truth-retry'));replace(card,body,original());}
+      }finally{busy=false;}
+    }
+    body.append(text('p','Loading Truth Social post…','muted truth-status'));card.append(body,original());
+    truthLoads.set(card,load);truthObserver.observe(card);return card;
+  }
   function linkPreview(item,post,detail){
     if(item.kind==='twitter')return tweetPreview(item.tweet,item.url);
     const card=el('div',{class:'link-preview '+item.kind});
+    if(item.kind==='truth')return truthPreview(item);
     if(item.kind==='youtube'||item.kind==='rumble'){
       const provider=item.kind==='youtube'?'YouTube':'Rumble';
       const launch=button('',e=>action(async()=>{
@@ -234,10 +296,12 @@
     const row=(name,label,handler)=>{const b=button('',()=>{closeDropdown();handler();},'menu-action');b.append(icon(name),text('span',label));return b;};
     box.append(row('share','Share post',()=>action(()=>rpc('share',{url:C.postURL(p)}))),row('link','Open on website',()=>action(()=>rpc('website',{url:C.postURL(p)}))));
     if(m.kind!=='link')box.append(row('download','Save '+m.kind,()=>saveMedia(m.url,p.title)));
-    if(C.owned(p,state.username))box.append(row('bookmark','Edit flair',()=>flairPicker(p.community,p,async selected=>{
-      await api(selected?'/api/v2/post/set_flair':'/api/v2/post/delete_flair',selected?{id:p.id,flair_text:selected.text,flair_class:selected.class}:{id:p.id},'POST');
-      p.post_flair_text=selected?.text||'';p.post_flair_class=selected?.class||'';closeSheet();toast('Flair updated.');if(state.page==='thread')threadPage(p);else feedPage();
-    })));
+    if(C.owned(p,state.username))box.append(row('bookmark','Edit flair',()=>{const owner=accountContext(),page=state.sequence;flairPicker(p.community,p,async(selected,token)=>{
+      if(!owner.current())throw new Error('Your account changed. Reopen this post.');
+      await api(selected?'/api/v2/post/set_flair':'/api/v2/post/delete_flair',selected?{id:p.id,flair_text:selected.text,flair_class:selected.class}:{id:p.id},'POST',owner.user);
+      p.post_flair_text=selected?.text||'';p.post_flair_class=selected?.class||'';
+      if(owner.current()&&ownsSheet(token)){closeSheet();if(page===state.sequence){const position={scroll:scrollY,anchor:scrollAnchor()};if(state.page==='thread'){state.returning=true;await threadPage(p);}else feedPage();if(page===state.sequence)restoreScroll(position,page);}}
+    });}));
     openDropdown('Post actions',box,anchor,box.children.length);
   }
   function fileName(url,title){const suffix=new URL(url).pathname.split('/').pop()||'media';return (title||'media').replace(/[^a-z0-9 _-]/gi,'').slice(0,50)+'-'+suffix;}
@@ -361,30 +425,44 @@
       if(state.settings.preload&&!state.metered)state.feed.slice(0,6).forEach(p=>{const m=C.media(p);if(m.kind==='image'){const image=new Image();image.referrerPolicy='no-referrer';image.src=m.url;}});
     }catch(e){if(seq===state.sequence&&load===feedLoad){if(append&&state.feed.length){const tail=node?.isConnected?node:el('div',{class:'feed-tail'});replace(tail,text('p',e.message),button('Retry loading posts',()=>loadFeed(true,tail)));if(!tail.isConnected)main.append(tail);}else failure(e,()=>loadFeed(false));}}finally{if(load===feedLoad)feedBusy=false;if(node?.isConnected)node.disabled=false;}}
   function scrollToComments(){const area=$('#comments');if(!area)return;area.scrollIntoView({block:'start'});area.focus({preventScroll:true});}
-  async function threadPage(post){const seq=state.sequence;loading('Loading discussion…');try{
+  async function threadPage(post){const seq=state.sequence,returning=!!state.returning;state.returning=false;loading('Loading discussion…');try{
       const result=await api('/api/v2/post/post.json',{id:post.id||post.uuid,comments:true});if(seq!==state.sequence)return;
       const p=result.data.posts?.[0]||post;state.post=p;const comments=result.data.comments||[],groups=new Map();for(const c of comments){const parent=Number(c.comment_parent_id||0);if(!groups.has(parent))groups.set(parent,[]);groups.get(parent).push(c);}
       replace(main,cachedNotice(result),postCard(p,true));const entry=button('',()=>replyTo(p,0),'comment-entry');entry.append(icon('edit'),text('span',state.username?'Write a comment…':'Sign in to comment…'));const area=el('section',{id:'comments',class:'section',tabindex:'-1'},text('h2',`${comments.length} comments`),entry);
-      function commentNode(c,depth,ancestors){if(ancestors.has(c.id))return null;const next=new Set(ancestors);next.add(c.id);const node=el('article',{class:'comment','aria-expanded':'true'});
+      function commentNode(c,depth,ancestors){if(ancestors.has(c.id))return null;const next=new Set(ancestors);next.add(c.id);const node=el('article',{class:'comment','aria-expanded':'true','data-comment-id':c.id});
         const head=button('',()=>{const expanded=node.getAttribute('aria-expanded')==='true';node.setAttribute('aria-expanded',String(!expanded));head.setAttribute('aria-expanded',String(!expanded));});head.className='comment-head';head.setAttribute('aria-expanded','true');head.append(text('strong','u/'+c.author),text('span',ago(c.created)+' · tap to collapse'));
         node.append(head);if(c.author_flair_text)node.append(el('span',{class:'flair',title:'User flair'},C.cleanFlair(c.author_flair_text)));
         node.append(richContent(c.content,c.raw_content,'comment-body'),el('div',{class:'actions'},...voteControls(c,false),button('Reply',()=>replyTo(p,c.id))));
         const kids=groups.get(Number(c.id))||[];if(kids.length&&depth<50)node.append(el('div',{class:'replies'+(depth>=3?' depth-limit':'')},...kids.map(k=>commentNode(k,depth+1,next))));return node;}
       for(const c of groups.get(0)||[])area.append(commentNode(c,0,new Set()));main.append(area);
       if(comments.some(c=>c.is_descendent_break||c.is_sibling_break))main.append(button('View remaining comments on website',()=>rpc('website',{url:C.postURL(p)}),'load-more'));
-      if(state.threadFocus==='comments')requestAnimationFrame(scrollToComments);
+      if(!returning&&state.threadFocus==='comments')requestAnimationFrame(scrollToComments);
     }catch(e){if(seq===state.sequence)failure(e,()=>threadPage(post));}}
-  function replyTo(post,parent){if(!state.username){toast('Sign in to reply.');return;}const key=ownKey(`reply:${post.id}:${parent}`),input=el('textarea',{'aria-label':'Comment',placeholder:'Write your reply…'});input.value=readLocal(key,'');input.oninput=()=>remember(key,input.value);
-    const send=button('Post reply',e=>action(async()=>{if(!input.value.trim())throw new Error('Write a reply first.');const value=input.value;
-      e.currentTarget.disabled=true;try{await api('/api/v2/action/create_comment',{community:post.community,parentId:post.id,commentParentId:parent,content:value},'POST');remember(key,null);closeSheet();toast('Reply posted.');threadPage(post);}catch(error){throw new Error(error.message+' Check the thread before submitting again. Your draft is saved.');}
-    },e.currentTarget),'primary');sheet('Reply',el('div',{},input,el('div',{class:'dialog-actions'},send)));}
-  async function flairPicker(community,current,onSelect){sheet('Choose post flair',text('p','Loading flairs…','muted'),'flair');try{
-      const result=await api('/api/v2/community/post_flairs.json',{community:community||'thedonald'});const options=result.data.flairs||[];
-      const list=el('div',{class:'flair-options',role:'radiogroup','aria-label':'Post flair'});
+  function replyTo(post,parent){
+    if(!state.username){toast('Sign in to reply.');return;}
+    const owner=accountContext(),page=state.sequence,key=ownKey(`reply:${post.id}:${parent}`,owner.user),input=el('textarea',{'aria-label':'Comment',placeholder:'Write your reply…'});
+    input.value=readLocal(key,'');input.oninput=()=>remember(key,input.value);
+    let token;
+    const send=button('Post reply',e=>action(async()=>{
+      if(!input.value.trim())throw new Error('Write a reply first.');if(!owner.current())throw new Error('Your account changed. Reopen the reply.');
+      const value=input.value,revision=store.revision(key);
+      await api('/api/v2/action/create_comment',{community:post.community,parentId:post.id,commentParentId:parent,content:value},'POST',owner.user);
+      clearRevision(key,revision);
+      if(owner.current()){toast('Reply posted.');if(ownsSheet(token)&&page===state.sequence){closeSheet();const position={scroll:scrollY,anchor:scrollAnchor()};state.returning=true;await threadPage(post);if(page===state.sequence)restoreScroll(position,page);}}
+    },e.currentTarget),'primary');
+    const status=text('p','','muted');status.dataset.draftKey=key;status.dataset.savedLabel='Draft saved on this device.';
+    token=sheet('Reply',el('div',{},input,status,el('div',{class:'dialog-actions'},send)));storageStatus();
+  }
+  async function flairPicker(community,current,onSelect){
+    const token=sheet('Choose post flair',text('p','Loading flairs…','muted'),'flair');
+    try{
+      const result=await api('/api/v2/community/post_flairs.json',{community:community||'thedonald'});if(!ownsSheet(token))return;
+      const options=result.data.flairs||[],list=el('div',{class:'flair-options',role:'radiogroup','aria-label':'Post flair'});
       function option(f){const selected=f?f.class===(current?.class||current?.post_flair_class):!current?.class&&!current?.post_flair_class;
-        return el('button',{class:'flair-option',role:'radio','aria-checked':String(selected),onclick:e=>action(()=>onSelect(f),e.currentTarget)},el('span',{class:'check'},selected?icon('check'):null),text('span',f?C.cleanFlair(f.text)||f.class:'No flair'));}
+        return el('button',{class:'flair-option',role:'radio','aria-checked':String(selected),onclick:e=>{if(ownsSheet(token))action(()=>onSelect(f,token),e.currentTarget);}},el('span',{class:'check'},selected?icon('check'):null),text('span',f?C.cleanFlair(f.text)||f.class:'No flair'));}
       list.append(option(null),...options.map(option));replace($('#sheet-body'),cachedNotice(result),text('p','Full labels are shown. Your selection is previewed before posting.','muted'),list);
-    }catch(e){replace($('#sheet-body'),text('p',e.message),button('Retry',()=>flairPicker(community,current,onSelect),'secondary'));}}
+    }catch(e){if(ownsSheet(token))replace($('#sheet-body'),text('p',e.message),button('Retry',()=>flairPicker(community,current,onSelect),'secondary'));}
+  }
   function requireLogin(){empty('Sign in to continue','Use your normal patriots.win account. Your password stays in the website sign-in form.',button('Sign in',()=>action(()=>rpc('login')),'primary'));}
   function composePage(){if(!state.username){requireLogin();return;}
     const key=ownKey('draft'),draft=readLocal(key,{type:'text',title:'',content:'',link:'',flair:null}),journal=readLocal(ownKey('publish'),null);
@@ -396,37 +474,84 @@
     const count=text('p',`${draft.title.length}/300 · Titles cannot be edited later.`,'muted');title.oninput=()=>{draft.title=title.value;count.textContent=`${title.value.length}/300 · Titles cannot be edited later.`;save();};box.append(el('div',{class:'field'},el('label',{for:'post-title'},'Title'),title,count));
     if(draft.type==='text'){const input=el('textarea',{id:'post-content',placeholder:'Write your post…'});input.value=draft.content;input.oninput=()=>{draft.content=input.value;save();};box.append(el('div',{class:'field'},el('label',{for:'post-content'},'Text'),input));}
     else {const link=el('input',{id:'post-link',type:'url',placeholder:'https://…'});link.value=draft.link;link.oninput=()=>{draft.link=link.value;save();};box.append(el('div',{class:'field'},el('label',{for:'post-link'},draft.type==='media'?'Media URL':'Link'),link));
-      if(draft.type==='media')box.append(button('Choose image or video',e=>action(async()=>{const result=await rpc('upload');draft.link=result.url;save();composePage();},e.currentTarget),'secondary'),text('p','Images upload to Scored; MP4 videos upload to Videy. You will confirm before uploading.','muted'));
+      if(draft.type==='media')box.append(button('Choose image or video',e=>action(async()=>{const owner=accountContext(),page=state.sequence,revision=store.revision(key),result=await rpc('upload',{expectedUser:owner.user});if(!owner.current()||store.revision(key)!==revision){toast('Upload finished. Reopen the original draft to use its link.');return;}draft.link=result.url;save();if(page===state.sequence)composePage();},e.currentTarget),'secondary'),text('p','Images upload to Scored; MP4 videos upload to Videy. You will confirm before uploading.','muted'));
     }
     const flairButton=button('',()=>flairPicker('thedonald',draft.flair,selected=>{draft.flair=selected;save();closeSheet();composePage();}),'flair-select');flairButton.append(text('span',draft.flair?C.cleanFlair(draft.flair.text):'Choose flair'),icon('chevron'));box.append(el('div',{class:'field'},text('label','Post flair'),flairButton));
-    box.append(text('p','Draft saved · Review before publishing','muted'),button('Preview post',()=>{
+    const draftStatus=text('p','Draft saved · Review before publishing','muted');draftStatus.dataset.draftKey=key;
+    box.append(draftStatus,button('Preview post',()=>{
       try{C.validateDraft(draft);}catch(e){toast(e.message);return;}
       const preview={...draft,id:'preview',author:state.username,created:Date.now(),post_flair_text:draft.flair?.text,post_flair_class:draft.flair?.class,raw_content:draft.type==='text'?draft.content:'',is_image:draft.type==='media'&&!/\.mp4/i.test(draft.link)};
-      const content=el('div',{},text('h2',draft.title),flair(preview),text('div',draft.content||draft.link,'content'));
+      const content=el('div',{},text('h2',draft.title),flair(preview),text('div',draft.type==='text'?(draft.content||''):draft.link,'content'));
       const media=C.media(preview);if(draft.type==='media'&&media.kind!=='link')content.append(mediaView(media,draft.title));
       content.append(el('div',{class:'dialog-actions'},button('Publish post',e=>action(async()=>{e.currentTarget.disabled=true;await publishDraft(draft);},e.currentTarget),'primary')));sheet('Preview',content);
-    },'primary'));replace(main,box);}
+    },'primary'));replace(main,box);storageStatus();}
   async function locateCreated(created){if(created.posts?.length)return created.posts[0];
     const raw=created.link||'',url=C.safeURL(raw.startsWith('/')?'https://patriots.win'+raw:raw),match=url&&new URL(url).pathname.match(/\/p\/([^/]+)/);
     if(!match)throw new Error('Post was created, but its link could not be read. Check your profile; do not publish again.');
     const result=await api('/api/v2/post/post.json',{id:decodeURIComponent(match[1])});if(!result.data.posts?.[0])throw new Error('Post was created. Open your profile to find it.');return result.data.posts[0];}
-  async function publishDraft(draft){try{
-      const result=await C.publish(draft,{remember:value=>remember(ownKey('publish'),value),create:async params=>(await api('/api/v2/action/create_post',params,'POST')).data,locate:locateCreated,
-        apply:(id,f)=>api('/api/v2/post/set_flair',{id,flair_text:f.text,flair_class:f.class},'POST')},readLocal(ownKey('publish'),null));
-      remember(ownKey('draft'),null);closeSheet();if(result.pendingFlair){toast('Post published; flair could not be applied. Retry flair from New post.');composePage();}else{toast('Post published.');openPost(result.post);}
-    }catch(e){closeSheet();composePage();toast(e.message);}}
-  function recovery(j){const box=el('div',{class:'notice'},text('h2',j.stage==='flair'?'Post published; flair pending':'Check the previous posting attempt'),text('p',j.title),text('p','Your draft is preserved. Do not create another copy until you check your profile.'));
-    box.append(button('Check my posts',()=>navigate('profile'),'secondary'));
-    if(j.post||j.created)box.append(button('Finish applying flair',e=>action(async()=>{const post=j.post||await locateCreated(j.created);j.post=post;j.stage='flair';remember(ownKey('publish'),j);if(j.flair)await api('/api/v2/post/set_flair',{id:post.id,flair_text:j.flair.text,flair_class:j.flair.class},'POST');remember(ownKey('publish'),null);remember(ownKey('draft'),null);toast('Post is ready.');openPost(post);},e.currentTarget),'primary'));
-    box.append(button('Resolve this attempt',()=>sheet('Resolve publishing attempt',el('div',{},text('p','Check your profile first. If the post exists, use Edit flair on that post.'),button('Post exists — clear this draft',()=>{remember(ownKey('publish'),null);remember(ownKey('draft'),null);closeSheet();composePage();}),button('Confirmed no post — keep draft',()=>{remember(ownKey('publish'),null);closeSheet();composePage();})))));return box;}
-  function searchPage(){const input=el('input',{type:'search',placeholder:'Search TheDonald','aria-label':'Search posts'});input.value=state.query||'';
-    const results=el('div');const form=el('form',{class:'toolbar'},input,el('button',{type:'submit',class:'secondary'},'Search'));form.onsubmit=async e=>{e.preventDefault();state.query=input.value.trim();if(!state.query)return;replace(results,text('p','Searching…','spinner'));const seq=state.sequence;
-      try{const r=await api('/api/v2/post/search.json',{community:'thedonald',query:state.query,sort:'new',page:1});if(seq!==state.sequence)return;replace(results,cachedNotice(r),...(r.data.posts||[]).map(p=>postCard(p)));if(!r.data.posts?.length)results.append(text('p','No posts found.','empty'));}catch(error){replace(results,text('p',error.message,'notice'));}};replace(main,form,results);}
-  async function profilePage(){if(!state.username){requireLogin();return;}const seq=state.sequence;loading();try{
-      const r=await api('/api/v2/post/profile.json',{user:state.username,page:1});if(seq!==state.sequence)return;
-      const header=el('section',{class:'section'},text('h1','u/'+state.username),text('p','Signed in on this device.','muted'),button('Saved posts',()=>{replace(main,el('section',{class:'section'},text('h1','Saved posts')), ...readLocal(ownKey('bookmarks'),[]).map(p=>postCard(p)));}),button('Website account settings',()=>action(()=>rpc('website',{url:'https://patriots.win/settings'}))));
-      replace(main,header,cachedNotice(r),...(r.data.posts||[]).map(p=>postCard(p)));if(!r.data.posts?.length)main.append(text('p','No posts yet.','empty'));
-    }catch(e){if(seq===state.sequence)failure(e,profilePage);}}
+  async function publishDraft(draft){
+    const owner=accountContext(),key=ownKey('publish',owner.user),draftKey=ownKey('draft',owner.user),revision=store.revision(draftKey),page=state.sequence,token=sheetGeneration;
+    if(publishing.has(key)){toast('This post is still being published.');return;}const existing=readLocal(key,null);let createSent=false;publishing.add(key);
+    try{
+      if(!owner.user)throw new Error('Sign in before posting.');
+      const snapshot=JSON.parse(JSON.stringify(draft));
+      const result=await C.publish(snapshot,{remember:value=>durable(key,value),create:async params=>{createSent=true;return (await api('/api/v2/action/create_post',params,'POST',owner.user)).data;},locate:locateCreated,
+        apply:(id,f)=>{if(!owner.current())throw new Error('Sign back into the original account to finish applying flair.');return api('/api/v2/post/set_flair',{id,flair_text:f.text,flair_class:f.class},'POST',owner.user);}},existing);
+      clearRevision(draftKey,revision);
+      if(owner.current()){toast(result.pendingFlair?'Post published; flair is pending. Finish it from New post.':'Post published.');if(ownsSheet(token)&&page===state.sequence){closeSheet();if(result.pendingFlair)composePage();else openPost(result.post);}}
+    }catch(e){if(!createSent&&!existing)remember(key,null);if(owner.current()){toast(e.message);if(ownsSheet(token)&&page===state.sequence){closeSheet();composePage();}}}
+    finally{publishing.delete(key);if(owner.current()&&state.page==='compose'&&page===state.sequence&&!$('#sheet').open)composePage();}
+  }
+  function recovery(j){
+    const owner=accountContext(),key=ownKey('publish',owner.user),draftKey=ownKey('draft',owner.user),revision=store.revision(draftKey),page=state.sequence;
+    const box=el('div',{class:'notice'},text('h2',publishing.has(key)?'Publishing…':j.stage==='flair'?'Post published; flair pending':'Check the previous posting attempt'),text('p',j.title),text('p','Your draft is preserved. Check your profile before creating another copy.'));
+    box.append(button('Check my posts',()=>navigate('profile'),'secondary'));if(publishing.has(key)){box.append(text('p','The original request is still running.'));return box;}
+    if(j.post||j.created)box.append(button('Finish applying flair',e=>action(async()=>{
+      if(!owner.current()||publishing.has(key))throw new Error('Reopen this pending post under its original account.');publishing.add(key);
+      try{const post=j.post||await locateCreated(j.created);j.post=post;j.stage='flair';durable(key,j);if(!owner.current())throw new Error('Sign back into the original account to finish.');
+        if(j.flair)await api('/api/v2/post/set_flair',{id:post.id,flair_text:j.flair.text,flair_class:j.flair.class},'POST',owner.user);
+        durable(key,null);clearRevision(draftKey,revision);if(owner.current()){toast('Post is ready.');if(page===state.sequence)openPost(post);}
+      }finally{publishing.delete(key);}
+    },e.currentTarget),'primary'));
+    box.append(button('Resolve this attempt',()=>sheet('Resolve publishing attempt',el('div',{},text('p','Check your profile first. If the post exists, use Edit flair on that post.'),
+      button('Post exists — clear this draft',()=>{if(!owner.current()||publishing.has(key))return;durable(key,null);clearRevision(draftKey,revision);closeSheet();composePage();}),
+      button('Confirmed no post — keep draft',()=>{if(!owner.current()||publishing.has(key))return;durable(key,null);closeSheet();composePage();})))));return box;
+  }
+  function pagedPosts(container,path,params,model,valid){
+    let busy=false;const observer=new IntersectionObserver(entries=>{if(entries.some(e=>e.isIntersecting))load();},{rootMargin:'0px 0px 400px 0px'});
+    activeListCleanup=()=>observer.disconnect();
+    function tail(){observer.disconnect();container.querySelector('.result-tail')?.remove();if(model.more){const n=text('div','Loading more posts…','feed-tail result-tail');container.append(n);observer.observe(n);}else if(model.posts.length)container.append(text('p','You’re caught up.','feed-tail result-tail'));}
+    async function load(){if(!valid()||busy||!model.more)return;busy=true;try{
+      const r=await api(path,{...params,page:model.page+1});if(!valid())return;
+      const merged=C.mergePosts(model.posts,r.data.posts||[]);model.posts=merged.posts;model.page++;model.more=r.data.has_more_entries!==false&&merged.added.length>0;
+      container.querySelector('.result-tail')?.remove();container.querySelector('.spinner')?.remove();for(const post of merged.added)container.append(postCard(post));
+      if(!model.posts.length)container.append(text('p','No posts found.','empty'));tail();
+    }catch(e){if(valid()){observer.disconnect();container.querySelector('.result-tail')?.remove();container.querySelector('.spinner')?.remove();container.append(el('div',{class:'feed-tail result-tail'},text('p',e.message),button('Retry',()=>{container.querySelector('.result-tail')?.remove();load();})));}}
+    finally{busy=false;}}
+    replace(container,...model.posts.map(p=>postCard(p)));if(model.page)tail();else{container.append(text('div','Loading posts…','spinner'));return load();}
+  }
+  function savedPage(){
+    const list=readLocal(ownKey('bookmarks'),[]);replace(main,el('section',{class:'section'},text('h1','Saved posts')),...list.map(p=>postCard(p)));
+    if(!list.length)main.append(text('p','Use the bookmark icon on a post to save it here.','empty'));
+    if(state.username){const guest=readLocal(ownKey('bookmarks',''),[]);if(guest.length)main.append(el('section',{class:'section'},text('h2','Saved while signed out')),...guest.map(p=>postCard(p,false,'')));}
+  }
+  function searchPage(){
+    const input=el('input',{type:'search',placeholder:'Search TheDonald','aria-label':'Search posts'});input.value=state.query||'';
+    const results=el('div'),form=el('form',{class:'toolbar'},input,el('button',{type:'submit',class:'secondary'},'Search'));replace(main,form,results);
+    const seq=state.sequence;
+    function run(fresh){activeListCleanup?.();const query=input.value.trim();state.query=query;const generation=++searchGeneration;if(!query){state.searchModel=null;replace(results);return;}
+      if(fresh||!state.searchModel||state.searchModel.query!==query)state.searchModel={query,posts:[],page:0,more:true};
+      return pagedPosts(results,'/api/v2/post/search.json',{community:'thedonald',query,sort:'new'},state.searchModel,()=>seq===state.sequence&&generation===searchGeneration);
+    }
+    form.onsubmit=e=>{e.preventDefault();run(true);};if(state.searchModel&&state.searchModel.query===state.query)return run(false);
+  }
+  function profilePage(){
+    const header=el('section',{class:'section'},text('h1',state.username?'u/'+state.username:'Profile'),button('Saved posts',()=>navigate('saved')));
+    if(!state.username){header.append(text('p','Browse and save posts without an account. Sign in to post or reply.','muted'),button('Sign in',()=>action(()=>rpc('login')),'primary'));replace(main,header);return;}
+    const seq=state.sequence,user=state.username;header.append(button('Website account settings',()=>action(()=>rpc('website',{url:'https://patriots.win/settings'}))));
+    const results=el('div');replace(main,header,results);if(!state.profileModel||state.profileModel.user!==user)state.profileModel={user,posts:[],page:0,more:true};
+    return pagedPosts(results,'/api/v2/post/profile.json',{user},state.profileModel,()=>seq===state.sequence&&state.username===user);
+  }
   async function inboxPage(){if(!state.username){requireLogin();return;}const seq=state.sequence;loading();try{
       const r=await api('/api/v2/message/messages.json',{type:'all',page:1});if(seq!==state.sequence)return;
       replace(main,el('section',{class:'section'},text('h1','Inbox'),button('Open full inbox on website',()=>rpc('website',{url:'https://patriots.win/messages'}),'secondary')));
@@ -440,7 +565,7 @@
       sheet('About Patriot Reader',el('div',{},text('p','Version '+state.appVersion),text('p','An independent Android reader for patriots.win.'),el('p',{},link)));
     },'setting about-setting');
     about.append(text('span','About'),el('span',{class:'about-version'},state.appVersion?'v'+state.appVersion:'',icon('chevron')));box.append(about);
-    function selectSetting(label,key,options,help){const value=options.find(([v])=>String(v)===String(state.settings[key]))?.[1]||state.settings[key];const choose=button('',e=>choices(label,options,state.settings[key],selection=>action(async()=>{state.settings[key]=key==='textSize'||key==='cacheMb'?Number(selection):selection;await saveSettings();settingsPage();}),e.currentTarget),'setting-choice');choose.setAttribute('aria-label',label+': '+value);choose.append(text('span',value),icon('chevron'));box.append(el('div',{class:'setting'},el('div',{class:'setting-line'},text('span',label),choose),help?text('small',help):null));}
+    function selectSetting(label,key,options,help){const value=options.find(([v])=>String(v)===String(state.settings[key]))?.[1]||state.settings[key];const choose=button('',e=>choices(label,options,state.settings[key],selection=>action(async()=>{const seq=state.sequence;state.settings[key]=key==='textSize'||key==='cacheMb'?Number(selection):selection;await saveSettings();if(seq===state.sequence&&state.page==='settings')settingsPage();}),e.currentTarget),'setting-choice');choose.setAttribute('aria-label',label+': '+value);choose.append(text('span',value),icon('chevron'));box.append(el('div',{class:'setting'},el('div',{class:'setting-line'},text('span',label),choose),help?text('small',help):null));}
     function toggle(label,key,help){const id='setting-'+key,input=el('input',{type:'checkbox',role:'switch',class:'setting-switch',id,checked:state.settings[key]});input.onchange=()=>action(async()=>{state.settings[key]=input.checked;await saveSettings();});box.append(el('div',{class:'setting toggle'},el('label',{for:id},label,help?text('small',help):null),input));}
     selectSetting('Appearance','theme',[['dark','Dark'],['light','Light'],['system','Follow system']]);selectSetting('Text size','textSize',[[15,'Small'],[17,'Standard'],[20,'Large'],[24,'Extra large']]);selectSetting('Feed layout','layout',[['compact','Compact'],['cards','Image cards']]);
     toggle('Plain, readable flair','plainFlair','Full labels always remain visible.');toggle('Show website ads','showAds','Off by default. Applies to the website view; the reader contains no ad placements.');
@@ -448,6 +573,7 @@
     selectSetting('Temporary cache limit','cacheMb',[[16,'16 MB'],[64,'64 MB'],[128,'128 MB'],[256,'256 MB']],'Cached posts and images expire after seven days. Downloads, saved posts and drafts are separate.');
     const usage=text('p','Checking storage…','muted');box.append(el('div',{class:'setting'},usage,button('Clear temporary cache',e=>action(async()=>{await rpc('clearCache');usage.textContent='Temporary cache cleared. Downloads and drafts are preserved.';},e.currentTarget),'secondary')));rpc('cacheInfo').then(r=>usage.textContent=`Temporary cache: ${(r.bytes/1048576).toFixed(1)} MB`).catch(()=>usage.textContent='Cache usage unavailable.');
     box.append(el('div',{class:'setting'},text('h2','Account'),text('p',state.username?'Signed in as '+state.username:'Browsing without an account','muted'),button(state.username?'Sign out':'Sign in',()=>state.username?sheet('Sign out?',el('div',{},text('p','This removes the saved login. Your downloads and account-specific drafts remain on this device.'),button('Sign out',()=>action(async()=>{await rpc('logout');closeSheet();accountChanged('');}),'primary'))):action(()=>rpc('login')))));
+    if(state.sessionNeedsReset)box.append(el('div',{class:'notice'},text('p','Your saved login could not be read. Reset only the login to sign in again; drafts and downloads are kept.'),button('Reset saved login',()=>action(async()=>{await rpc('logout');state.sessionNeedsReset=false;accountChanged('');toast('Saved login reset. Your drafts and downloads are unchanged.');}),'primary')));
     replace(main,box);}
   async function downloadsPage(){
     const seq=state.sequence,rows=new Map();let busy=false;
@@ -486,6 +612,6 @@
   function pauseEmbeds(except){for(const[frame,entry]of embeddedPlayers){if(frame===except)continue;if(entry.kind==='youtube')youtubeCommand(frame,'pauseVideo');else entry.stop();}}
   window.ReaderPause=()=>{document.querySelectorAll('video,audio').forEach(m=>m.pause());pauseEmbeds();};
   document.addEventListener('visibilitychange',()=>{if(document.hidden){window.ReaderPause();clearTimeout(downloadTimer);downloadTimer=null;}else refreshDownloads?.();});
-  ready.then(async()=>{try{const data=await rpc('bootstrap');Object.assign(state,{username:data.username||'',appVersion:data.appVersion||'',metered:data.metered,systemDark:data.systemDark,settings:C.normalizeSettings(data.settings)});theme();state.sort=readLocal('reader:sort','hot');if(!['hot','new','active','rising','top'].includes(state.sort))state.sort='hot';navigate('feed',false);}catch(e){failure(e,()=>location.reload());}});
+  ready.then(async()=>{try{const data=await rpc('bootstrap');Object.assign(state,{username:data.username||'',appVersion:data.appVersion||'',metered:data.metered,systemDark:data.systemDark,sessionNeedsReset:!!data.sessionNeedsReset,settings:C.normalizeSettings(data.settings)});theme();state.sort=readLocal('reader:sort','hot');if(!['hot','new','active','rising','top'].includes(state.sort))state.sort='hot';navigate('feed',false);showNotice(data.notice||'');if(data.sessionNeedsReset)toast('Saved login could not be read. You can browse as a guest or reset it in Settings.');}catch(e){failure(e,()=>location.reload());}});
   setTimeout(()=>{if(!port&&!window.ReaderPreview)empty('Reader connection unavailable','Close and reopen the app to reconnect.');},12000);
 })();

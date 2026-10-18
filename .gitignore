@@ -31,6 +31,7 @@
 !/app/src/main/java/app/patriotreader/MainActivity.java
 !/app/src/main/java/app/patriotreader/Policy.java
 !/app/src/main/java/app/patriotreader/Vault.java
+!/app/src/main/java/app/patriotreader/RequestGate.java
 !/app/src/main/res/
 /app/src/main/res/*
 !/app/src/main/res/drawable/

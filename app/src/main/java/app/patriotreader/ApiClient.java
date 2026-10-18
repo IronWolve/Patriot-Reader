@@ -38,9 +38,10 @@ final class ApiClient {
             return data;
         }finally{c.disconnect();}
     }
-    JSONObject call(String method,String path,JSONObject values)throws Exception {
+    JSONObject call(String method,String path,JSONObject values,String expectedUser)throws Exception {
         if(!Policy.apiAllowed(method,path))throw new IOException("Unsupported site operation");
         JSONObject saved=vault.read();
+        RequestGate.requireAccount(expectedUser,saved.optString("username",""));
         if(method.equals("POST")&&!saved.has("api_key"))throw new ApiError("Sign in before posting or changing flair.");
         String namespace=saved.optString("username","guest").toLowerCase(java.util.Locale.ROOT);
         String key=namespace+":"+path+"?"+query(values);
@@ -68,14 +69,32 @@ final class ApiClient {
             JSONObject result=new JSONObject().put("url",match.group(1));cache.put("rumble:"+url,result);return result;
         }finally{c.disconnect();}
     }
+    JSONObject truthPost(String id)throws Exception {
+        if(!id.matches("[0-9]{1,24}"))throw new IOException("Invalid Truth Social post ID.");
+        String key="truth:"+id;
+        // Public status metadata only. Never send the site's credentials or cookies here.
+        HttpURLConnection c=connection("https://truthsocial.com/api/v1/statuses/"+id);
+        c.setRequestProperty("Accept","application/json");
+        try{
+            int status=c.getResponseCode();
+            if(status>=400&&status<500)throw new ApiError(status==404?"This Truth Social post is unavailable.":"Truth Social refused this public post request.");
+            if(status!=200)throw new IOException("Truth Social could not load this post.");
+            JSONObject post=new JSONObject(new String(read(c.getInputStream(),1024*1024),"UTF-8"));
+            if(!id.equals(post.optString("id"))||post.optJSONObject("account")==null||!(post.opt("content") instanceof String))throw new IOException("Truth Social returned an unexpected post.");
+            cache.put(key,post);
+            return new JSONObject().put("data",post).put("cached",false).put("savedAt",System.currentTimeMillis());
+        }catch(ApiError error){throw error;}
+        catch(Exception error){JSONObject old=cache.get(key);if(old!=null)return old.put("cached",true);throw error;}
+        finally{c.disconnect();}
+    }
     JSONObject validateSession(JSONObject auth)throws Exception {
         if(auth.optString("api_key").isEmpty()||auth.optString("api_secret").isEmpty())throw new IOException("Finish signing in on the website first.");
         JSONObject profile=request("GET","/api/v2/user/about.json",new JSONObject().put("user","me"),auth).getJSONArray("users").getJSONObject(0);
         String username=profile.optString("username");if(username.isEmpty())throw new IOException("The website did not confirm a signed-in account.");
         return new JSONObject().put("username",username);
     }
-    JSONObject upload(android.content.Context context,android.net.Uri uri,String name,String mime)throws Exception {
-        JSONObject auth=vault.read();if(!auth.has("api_key"))throw new IOException("Sign in before uploading.");
+    JSONObject upload(android.content.Context context,android.net.Uri uri,String name,String mime,String expectedUser)throws Exception {
+        JSONObject auth=vault.read();RequestGate.requireAccount(expectedUser,auth.optString("username",""));if(!auth.has("api_key"))throw new IOException("Sign in before uploading.");
         boolean video="video/mp4".equals(mime);long max=video||"image/gif".equals(mime)?100L*1024*1024:12L*1024*1024;
         if(!video&&!mime.matches("image/(jpeg|png|gif|webp)"))throw new IOException("Choose JPG, PNG, GIF, WebP or MP4.");
         String target;

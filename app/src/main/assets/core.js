@@ -2,6 +2,20 @@
   'use strict';
   const defaults = Object.freeze({theme:'dark', showAds:false, layout:'compact', textSize:17,
     cacheMb:64, wifiDownloads:false, preload:false, autoplay:false, plainFlair:true});
+  // Keep failed writes recoverable in memory; durable transactions check write's result.
+  function createStore(storage) {
+    const memory=new Map(),dirty=new Map(),revisions=new Map();
+    function raw(key){if(memory.has(key))return memory.get(key);try{return storage.getItem(key);}catch{return null;}}
+    function flushKey(key,value){try{if(value===null)storage.removeItem(key);else storage.setItem(key,value);dirty.delete(key);return true;}catch{dirty.set(key,value);return false;}}
+    return {
+      read(key,fallback){try{const value=raw(key);return value===null?fallback:JSON.parse(value);}catch{return fallback;}},
+      write(key,value){const encoded=value===null?null:JSON.stringify(value);memory.set(key,encoded);revisions.set(key,(revisions.get(key)||0)+1);return flushKey(key,encoded);},
+      revision(key){return revisions.get(key)||0;},
+      retry(){for(const[key,value]of [...dirty])flushKey(key,value);return dirty.size===0;},
+      pending(){return [...dirty.keys()];},
+      recovery(){return Object.fromEntries([...dirty].filter(([,v])=>v!==null).map(([k,v])=>[k,JSON.parse(v)]));}
+    };
+  }
   function cleanFlair(value) { return String(value || '').replace(/\s+/gu, ' ').trim(); }
   function safeURL(value) {
     try { const u=new URL(value); return u.protocol==='https:' && !u.username && !u.password ? u.href : ''; }
@@ -19,12 +33,16 @@
       return /^[A-Za-z0-9_-]{11}$/.test(id||'')?id:'';
     }catch{return '';}
   }
+  function truthID(value){
+    try{const u=new URL(safeURL(value));if(!['truthsocial.com','www.truthsocial.com'].includes(u.hostname))return '';return u.pathname.match(/^\/(?:@[^/]+(?:\/posts)?|users\/[^/]+\/statuses|embed)\/(\d{1,24})\/?$/)?.[1]||'';}catch{return '';}
+  }
   function rumbleURL(value) {
     try {const u=new URL(safeURL(value));return ['rumble.com','www.rumble.com'].includes(u.hostname)&&/^\/(?:v[a-z0-9]+-[^/]+\.html|embed\/[a-z0-9]+\/?)$/i.test(u.pathname)?u.href:'';}catch{return '';}
   }
   function preview(post) {
     const url=safeURL(post.link),meta=post.link_metadata||{},youtube=youtubeID(url)||youtubeID(post.video_link);
     if(meta.twitter && typeof meta.twitter==='object')return {kind:'twitter',url,tweet:meta.twitter};
+    const truth=truthID(url);if(truth)return {kind:'truth',url,id:truth,title:meta.title||post.title,description:meta.description||''};
     if(rumbleURL(url))return {kind:'rumble',url,title:meta.title||post.title,image:safeURL(post.preview)||safeURL(meta.image)||''};
     if(youtube)return {kind:'youtube',url,id:youtube,title:meta.title||post.title,description:meta.description||'',image:`https://i.ytimg.com/vi/${youtube}/hqdefault.jpg`};
     const direct=media(post);if(direct.kind!=='link')return direct;
@@ -76,7 +94,7 @@
     }
     services.remember(null);return {post,pendingFlair:false};
   }
-  const api={defaults,cleanFlair,safeURL,owned,media,preview,youtubeID,rumbleURL,postURL,mergePosts,normalizeSettings,validateDraft,publish};
+  const api={defaults,createStore,cleanFlair,safeURL,owned,media,preview,youtubeID,truthID,rumbleURL,postURL,mergePosts,normalizeSettings,validateDraft,publish};
   if(typeof module!=='undefined' && module.exports)module.exports=api;
   root.ReaderCore=api;
 })(typeof globalThis!=='undefined'?globalThis:this);

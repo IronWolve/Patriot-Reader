@@ -9,6 +9,7 @@ I made this for my own use so I could stop using Firefox to browse patriots.win 
 - **Dark by default** — also supports light mode and your Android system theme.
 - **Readable post flair** — see flair on posts and choose it when creating a post on mobile.
 - **YouTube, X, and Rumble embeds** — supported videos play inside the reader. Open in X takes you directly to the installed X app, with an in-app browser fallback.
+- **Truth Social posts** — public post text, images and supported video/audio appear in reader cards, with a link to the original when a post is unavailable or restricted.
 - **Compact browsing** — automatic feed loading, direct access to comments, and collapsible reply threads. Comments support direct video/audio links, Unicode emojis, and clickable HTTPS URLs.
 - **Media controls** — pinch-to-zoom, double-tap and drag on images, playback speed for direct videos, and remembered volume for direct/X videos and YouTube.
 - **Save for later** — bookmark posts, download supported images, videos, and audio, and cache posts and images for repeat viewing.

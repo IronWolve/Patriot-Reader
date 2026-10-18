@@ -15,6 +15,8 @@
   <nav id="nav" aria-label="Main navigation"><button data-page="feed" aria-current="page"><span>Feed</span></button><button data-page="search"><span>Search</span></button><button data-page="compose" class="new-post"><span>New post</span></button><button data-page="inbox"><span>Inbox</span></button><button data-page="profile"><span>Profile</span></button></nav>
   <dialog id="sheet" aria-labelledby="sheet-title"><div class="sheet-head"><h2 id="sheet-title"></h2><button id="sheet-close" class="icon" aria-label="Close"></button></div><div id="sheet-body"></div></dialog>
   <dialog id="dropdown" aria-label="Choose an option"></dialog>
+  <div id="storage-warning" role="alert" hidden><span>Changes aren’t saved on this device. Keep the app open.</span><button id="storage-retry">Retry save</button><button id="storage-copy">Copy unsaved data</button></div>
+  <div id="recovery-notice" role="status" hidden><span id="recovery-message"></span><button id="recovery-dismiss" aria-label="Dismiss notice">Dismiss</button></div>
   <div id="toast" role="status" aria-live="polite" hidden></div>
 </body>
 </html>
