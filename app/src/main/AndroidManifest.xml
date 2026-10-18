@@ -1,10 +1,35 @@
-<manifest xmlns:android="http://schemas.android.com/apk/res/android" package="app.patriotreader" android:versionCode="11" android:versionName="0.9">
+<manifest xmlns:android="http://schemas.android.com/apk/res/android" package="app.patriotreader">
     <uses-sdk android:minSdkVersion="29" android:targetSdkVersion="35" />
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
     <application android:label="Patriot Reader" android:icon="@drawable/icon" android:theme="@style/AppTheme" android:debuggable="false" android:allowBackup="false" android:usesCleartextTraffic="false" android:supportsRtl="true" android:enableOnBackInvokedCallback="false">
-        <activity android:name=".MainActivity" android:exported="true" android:configChanges="orientation|screenSize|keyboardHidden|uiMode" android:windowSoftInputMode="adjustResize">
+        <activity android:name=".MainActivity" android:exported="true" android:launchMode="singleTop" android:configChanges="orientation|screenSize|keyboardHidden|uiMode" android:windowSoftInputMode="adjustResize">
             <intent-filter><action android:name="android.intent.action.MAIN" /><category android:name="android.intent.category.LAUNCHER" /></intent-filter>
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="https" android:host="patriots.win" android:pathPrefix="/p/" />
+                <data android:scheme="https" android:host="patriots.win" android:pathPrefix="/c/" />
+                <data android:scheme="https" android:host="patriots.win" android:pathPrefix="/u/" />
+                <data android:scheme="https" android:host="www.patriots.win" android:pathPrefix="/p/" />
+                <data android:scheme="https" android:host="www.patriots.win" android:pathPrefix="/c/" />
+                <data android:scheme="https" android:host="www.patriots.win" android:pathPrefix="/u/" />
+                <data android:scheme="https" android:host="scored.co" android:pathPrefix="/p/" />
+                <data android:scheme="https" android:host="scored.co" android:pathPrefix="/c/" />
+                <data android:scheme="https" android:host="scored.co" android:pathPrefix="/u/" />
+                <data android:scheme="https" android:host="www.scored.co" android:pathPrefix="/p/" />
+                <data android:scheme="https" android:host="www.scored.co" android:pathPrefix="/c/" />
+                <data android:scheme="https" android:host="www.scored.co" android:pathPrefix="/u/" />
+            </intent-filter>
         </activity>
+        <receiver android:name=".DownloadStore$CompletionReceiver" android:exported="true" android:permission="android.permission.SEND_DOWNLOAD_COMPLETED_INTENTS">
+            <intent-filter><action android:name="android.intent.action.DOWNLOAD_COMPLETE" /></intent-filter>
+        </receiver>
+        <receiver android:name=".DownloadStore$BootReceiver" android:exported="false">
+            <intent-filter><action android:name="android.intent.action.BOOT_COMPLETED" /></intent-filter>
+        </receiver>
+        <service android:name=".DownloadStore$PublicationService" android:permission="android.permission.BIND_JOB_SERVICE" android:exported="false" />
     </application>
 </manifest>

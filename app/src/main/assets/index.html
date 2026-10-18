@@ -4,13 +4,13 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
   <meta name="referrer" content="no-referrer">
-  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src https: data:; media-src https:; connect-src 'self'; font-src 'self'; frame-src https://www.youtube-nocookie.com https://rumble.com; base-uri 'none'; form-action 'none'">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' https: data:; media-src 'self' https:; connect-src 'self'; font-src 'self'; frame-src https://www.youtube-nocookie.com https://rumble.com; base-uri 'none'; form-action 'none'">
   <title>Patriot Reader</title>
   <link rel="stylesheet" href="app.css">
   <script src="core.js" defer></script><script src="app.js" defer></script>
 </head>
 <body>
-  <header id="header"><button id="back" class="icon" aria-label="Back" hidden></button><div class="brand"><span class="brand-mark">P</span><div><strong>Patriot Reader</strong><span id="subtitle">TheDonald</span></div></div><button id="downloads" class="icon" aria-label="Downloads"></button><button id="settings" class="icon" aria-label="Settings"></button></header>
+  <header id="header"><button id="back" class="icon" aria-label="Back" hidden></button><button id="site-choice" class="brand" aria-label="Choose site" aria-haspopup="dialog" aria-expanded="false"><span class="brand-mark">P</span><span class="brand-identity"><strong>Patriot Reader</strong><span id="subtitle">TheDonald</span></span></button><button id="downloads" class="icon" aria-label="Downloads"></button><button id="settings" class="icon" aria-label="Settings"></button></header>
   <main id="main" tabindex="-1"><div class="empty"><h1>Opening your reader…</h1><p>Your feed will appear here.</p></div></main>
   <nav id="nav" aria-label="Main navigation"><button data-page="feed" aria-current="page"><span>Feed</span></button><button data-page="search"><span>Search</span></button><button data-page="compose" class="new-post"><span>New post</span></button><button data-page="inbox"><span>Inbox</span></button><button data-page="profile"><span>Profile</span></button></nav>
   <dialog id="sheet" aria-labelledby="sheet-title"><div class="sheet-head"><h2 id="sheet-title"></h2><button id="sheet-close" class="icon" aria-label="Close"></button></div><div id="sheet-body"></div></dialog>

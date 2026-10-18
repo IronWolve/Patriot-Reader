@@ -1,6 +1,6 @@
 (() => {
   // Runs only in the isolated, first-party sign-in WebView. Never reads a password.
-  if (location.origin !== 'https://patriots.win' || window.top !== window) return null;
+  if (!['https://patriots.win','https://www.patriots.win','https://scored.co','https://www.scored.co'].includes(location.origin) || window.top !== window) return null;
   const api_key = localStorage.getItem('api_key');
   const api_secret = localStorage.getItem('api_secret');
   const valid = value => typeof value === 'string' && value.trim() !== '' &&

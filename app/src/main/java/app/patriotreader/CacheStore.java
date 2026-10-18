@@ -34,5 +34,5 @@ final class CacheStore {
     synchronized long size(){long sum=0;File[] files=root.listFiles();if(files!=null)for(File f:files)sum+=f.length();return sum;}
     synchronized void setLimit(long bytes){limit=bytes;trim();}
     private void trim(){File[] files=root.listFiles();if(files==null)return;Arrays.sort(files,Comparator.comparingLong(File::lastModified));long size=size();for(File f:files){if(size<=limit)break;long n=f.length();if(f.delete())size-=n;}}
-    synchronized void clear(){File[] files=root.listFiles();if(files!=null)for(File f:files)f.delete();}
+    synchronized long clear(){File[] files=root.listFiles();if(files==null)return root.exists()?-1:0;for(File f:files)f.delete();return root.listFiles()==null?-1:size();}
 }

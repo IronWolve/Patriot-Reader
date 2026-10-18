@@ -56,7 +56,31 @@
     if(url&&(post.is_image||/\.(png|jpe?g|gif|webp)$/i.test(new URL(url).pathname)))return {kind:'image',url};
     return {kind:'link',url};
   }
-  function postURL(post) { return `https://patriots.win/p/${encodeURIComponent(post.uuid || post.id)}/`; }
+  const PATRIOTS='https://patriots.win',SCORED='https://scored.co';
+  function siteOrigin(value){try{const u=new URL(safeURL(value));if(u.port&&u.port!=='443')return '';return ['patriots.win','www.patriots.win'].includes(u.hostname)?PATRIOTS:['scored.co','www.scored.co'].includes(u.hostname)?SCORED:'';}catch{return '';}}
+  function postURL(post) { return `${siteOrigin(post.site)||PATRIOTS}/p/${encodeURIComponent(post.uuid || post.id)}/`; }
+  function siteID(value) {
+    const raw=String(value||'');if(!/^[A-Za-z0-9]{1,24}$/.test(raw))return '';
+    if(/^\d+$/.test(raw)&&Number.isSafeInteger(Number(raw))&&Number(raw)>0)return String(Number(raw));
+    try{let n=0n;const alphabet='0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz';
+      for(const ch of raw)n=n*62n+BigInt(alphabet.indexOf(ch));
+      const bytes=[];while(n){bytes.unshift(Number(n%256n));n/=256n;}
+      const id=String.fromCharCode(...bytes).replace(/\0/g,'');
+      return /^\d+$/.test(id)&&Number.isSafeInteger(Number(id))&&Number(id)>0?String(Number(id)):'';
+    }catch{return '';}
+  }
+  function readerLink(value) {
+    try{const u=new URL(safeURL(value)),site=siteOrigin(value);if(!site)return null;
+      const profile=u.pathname.match(/^\/u\/([A-Za-z0-9_-]{1,64})\/?$/);if(profile)return {kind:'profile',user:profile[1],site};
+      const community=u.pathname.match(/^\/c\/([A-Za-z0-9_-]{1,64})\/?$/);if(community)return {kind:'community',community:community[1],site};
+      const parts=u.pathname.split('/').filter(Boolean),index=parts[0]==='p'?0:parts[0]==='c'&&parts[2]==='p'?2:-1;
+      if(index<0)return null;const uuid=parts[index+1],id=siteID(uuid);if(!id)return null;
+      const rest=parts.slice(index+2),c=rest.indexOf('c'),commentId=c>=0?siteID(rest[c+1]):'';if(c>=0&&!commentId)return null;
+      const sort=u.searchParams.get('commentSort');return {kind:'post',id,uuid,commentId,site,community:index===2?parts[1]:'',sort:['top','new','old','controversial'].includes(sort)?sort:''};
+    }catch{return null;}
+  }
+  function commentURL(post,comment){return postURL(post)+'x/c/'+encodeURIComponent(comment.uuid||comment.id);}
+  function mergeComments(existing,incoming){const map=new Map(existing.map(c=>[String(c.id),c]));for(const c of incoming)if(c&&c.id)map.set(String(c.id),{...map.get(String(c.id)),...c});return [...map.values()];}
   function mergePosts(existing,incoming) {
     const posts=existing.slice(),added=[],seen=new Set(existing.map(p=>String(p.id??p.uuid)));
     for(const post of incoming){const key=String(post.id??post.uuid);if(seen.has(key))continue;seen.add(key);posts.push(post);added.push(post);}
@@ -73,14 +97,16 @@
     if(!draft.title || !draft.title.trim())throw new Error('Add a title.');
     if(draft.title.length>300)throw new Error('Titles can contain up to 300 characters.');
     if(draft.type!=='text' && !safeURL(draft.link))throw new Error('Add an HTTPS link or upload media.');
-    return {community:'thedonald', type:draft.type==='text'?'text':'link', title:draft.title.trim(),
+    const community=draft.community===undefined?'thedonald':String(draft.community);
+    if(!/^[A-Za-z0-9_-]{1,64}$/.test(community)||['all','win','trending','home'].includes(community.toLowerCase()))throw new Error('Choose a community for this post.');
+    return {community, type:draft.type==='text'?'text':'link', title:draft.title.trim(),
       ...(draft.type==='text'?{content:draft.content||''}:{link:safeURL(draft.link)})};
   }
   // Journal creation before the request. A timeout is ambiguous: never silently resubmit.
   async function publish(draft, services, existing) {
     if(existing)throw new Error('Resolve the previous publishing attempt before posting again.');
     const params=validateDraft(draft);
-    const journal={stage:'submitting',title:params.title,flair:draft.flair||null,at:Date.now()};
+    const journal={stage:'submitting',site:draft.site||PATRIOTS,community:params.community,title:params.title,flair:draft.flair||null,at:Date.now()};
     services.remember(journal);
     let created;
     try {created=await services.create(params);}
@@ -94,7 +120,7 @@
     }
     services.remember(null);return {post,pendingFlair:false};
   }
-  const api={defaults,createStore,cleanFlair,safeURL,owned,media,preview,youtubeID,truthID,rumbleURL,postURL,mergePosts,normalizeSettings,validateDraft,publish};
+  const api={PATRIOTS,SCORED,siteOrigin,defaults,createStore,cleanFlair,safeURL,owned,media,preview,youtubeID,truthID,rumbleURL,postURL,siteID,readerLink,commentURL,mergeComments,mergePosts,normalizeSettings,validateDraft,publish};
   if(typeof module!=='undefined' && module.exports)module.exports=api;
   root.ReaderCore=api;
 })(typeof globalThis!=='undefined'?globalThis:this);

@@ -22,8 +22,9 @@ final class ApiClient {
             String k=keys.next();if(b.length()>0)b.append('&');b.append(URLEncoder.encode(k,"UTF-8")).append('=').append(URLEncoder.encode(String.valueOf(values.get(k)),"UTF-8"));
         }return b.toString();
     }
-    JSONObject request(String method,String path,JSONObject values,JSONObject auth)throws Exception {
-        String params=query(values);HttpURLConnection c=connection(Policy.SITE+path+(method.equals("GET")&&!params.isEmpty()?"?"+params:""));
+    JSONObject request(String site,String method,String path,JSONObject values,JSONObject auth)throws Exception {
+        if(!Policy.apiSite(site))throw new IOException("Unsupported site");
+        String params=query(values);HttpURLConnection c=connection(site+path+(method.equals("GET")&&!params.isEmpty()?"?"+params:""));
         c.setRequestMethod(method);c.setRequestProperty("Accept","application/json");
         if(auth!=null){c.setRequestProperty("X-Api-Key",auth.getString("api_key"));c.setRequestProperty("X-Api-Secret",auth.getString("api_secret"));}
         try{
@@ -38,17 +39,17 @@ final class ApiClient {
             return data;
         }finally{c.disconnect();}
     }
-    JSONObject call(String method,String path,JSONObject values,String expectedUser)throws Exception {
-        if(!Policy.apiAllowed(method,path))throw new IOException("Unsupported site operation");
-        JSONObject saved=vault.read();
+    JSONObject call(String site,String method,String path,JSONObject values,String expectedUser)throws Exception {
+        if(!Policy.apiSite(site)||!Policy.apiAllowed(method,path))throw new IOException("Unsupported site operation");
+        JSONObject saved=vault.read(site);
         RequestGate.requireAccount(expectedUser,saved.optString("username",""));
         if(method.equals("POST")&&!saved.has("api_key"))throw new ApiError("Sign in before posting or changing flair.");
         String namespace=saved.optString("username","guest").toLowerCase(java.util.Locale.ROOT);
-        String key=namespace+":"+path+"?"+query(values);
-        boolean cacheable=method.equals("GET")&&(path.startsWith("/api/v2/post/")||path.endsWith("post_flairs.json"));
+        String key=(Policy.SITE.equals(site)?"":site+":")+namespace+":"+path+"?"+query(values);
+        boolean cacheable=method.equals("GET")&&(path.startsWith("/api/v2/post/")||path.startsWith("/api/v2/comment/")||path.startsWith("/api/v2/content/")||path.endsWith("post_flairs.json"));
         try{
             // Public reads need no account token. /token is only available after login.
-            JSONObject data=request(method,path,values,saved.has("api_key")?saved:null);
+            JSONObject data=request(site,method,path,values,saved.has("api_key")?saved:null);
             if(cacheable)cache.put(key,data);
             return new JSONObject().put("data",data).put("cached",false).put("savedAt",System.currentTimeMillis());
         }catch(ApiError error){throw error;}
@@ -87,30 +88,37 @@ final class ApiClient {
         catch(Exception error){JSONObject old=cache.get(key);if(old!=null)return old.put("cached",true);throw error;}
         finally{c.disconnect();}
     }
-    JSONObject validateSession(JSONObject auth)throws Exception {
+    JSONObject validateSession(String site,JSONObject auth)throws Exception {
         if(auth.optString("api_key").isEmpty()||auth.optString("api_secret").isEmpty())throw new IOException("Finish signing in on the website first.");
-        JSONObject profile=request("GET","/api/v2/user/about.json",new JSONObject().put("user","me"),auth).getJSONArray("users").getJSONObject(0);
+        JSONObject profile=request(site,"GET","/api/v2/user/about.json",new JSONObject().put("user","me"),auth).getJSONArray("users").getJSONObject(0);
         String username=profile.optString("username");if(username.isEmpty())throw new IOException("The website did not confirm a signed-in account.");
-        return new JSONObject().put("username",username);
+        return new JSONObject().put("username",username).put("site",site);
     }
-    JSONObject upload(android.content.Context context,android.net.Uri uri,String name,String mime,String expectedUser)throws Exception {
-        JSONObject auth=vault.read();RequestGate.requireAccount(expectedUser,auth.optString("username",""));if(!auth.has("api_key"))throw new IOException("Sign in before uploading.");
+    JSONObject upload(android.content.Context context,android.net.Uri uri,String name,String mime,String expectedUser,String site,FileOperationGate.Handle control)throws Exception {
+        control.check();
+        if(!Policy.apiSite(site))throw new IOException("Unsupported site");JSONObject auth=vault.read(site);RequestGate.requireAccount(expectedUser,auth.optString("username",""));if(!auth.has("api_key"))throw new IOException("Sign in before uploading.");
         boolean video="video/mp4".equals(mime);long max=video||"image/gif".equals(mime)?100L*1024*1024:12L*1024*1024;
         if(!video&&!mime.matches("image/(jpeg|png|gif|webp)"))throw new IOException("Choose JPG, PNG, GIF, WebP or MP4.");
         String target;
         if(video)target="https://videy.co/api/upload";
-        else {JSONObject token=request("GET","/api/v2/upload/token.json",new JSONObject().put("uploadType","postMedia"),auth);target="https://media.scored.co/api/upload?token="+URLEncoder.encode(token.getString("token"),"UTF-8");}
-        String boundary="Reader"+java.util.UUID.randomUUID().toString().replace("-","");
+        else {JSONObject token=request(site,"GET","/api/v2/upload/token.json",new JSONObject().put("uploadType","postMedia"),auth);target="https://media.scored.co/api/upload?token="+URLEncoder.encode(token.getString("token"),"UTF-8");}
+        control.check();String boundary="Reader"+java.util.UUID.randomUUID().toString().replace("-","");
         HttpURLConnection c=connection(target);c.setReadTimeout(120000);c.setRequestMethod("POST");c.setDoOutput(true);c.setChunkedStreamingMode(65536);c.setRequestProperty("Content-Type","multipart/form-data; boundary="+boundary);
-        try(OutputStream out=c.getOutputStream();InputStream in=context.getContentResolver().openInputStream(uri)){
+        android.os.CancellationSignal cancellation=new android.os.CancellationSignal();
+        try(FileOperationGate.Registration cancelConnection=control.register(c::disconnect);FileOperationGate.Registration cancelProvider=control.register(cancellation::cancel)){
+          try(android.content.res.AssetFileDescriptor file=context.getContentResolver().openAssetFileDescriptor(uri,"r",cancellation)){
+            control.check();if(file==null)throw new IOException("Could not open the selected upload.");
+            try(InputStream in=file.createInputStream();FileOperationGate.Registration cancelInput=control.register(()->{try{in.close();}catch(IOException ignored){}});OutputStream out=c.getOutputStream();FileOperationGate.Registration cancelOutput=control.register(()->{try{out.close();}catch(IOException ignored){}})){
+            if(in==null)throw new IOException("Could not open the selected upload.");
             out.write(("--"+boundary+"\r\nContent-Disposition: form-data; name=\"file\"; filename=\""+Policy.filename(name)+"\"\r\nContent-Type: "+mime+"\r\n\r\n").getBytes("UTF-8"));
-            long total=0;byte[] b=new byte[65536];int n;while((n=in.read(b))!=-1){total+=n;if(total>max)throw new IOException("This file exceeds the site's upload limit.");out.write(b,0,n);}out.write(("\r\n--"+boundary+"--\r\n").getBytes("UTF-8"));
-        }
-        try{int status=c.getResponseCode();if(status<200||status>=300)throw new IOException("Upload failed (HTTP "+status+").");
+            long total=0;byte[] b=new byte[65536];int n;while(true){control.check();n=in.read(b);if(n==-1)break;control.check();total+=n;if(total>max)throw new IOException("This file exceeds the site's upload limit.");out.write(b,0,n);}control.check();out.write(("\r\n--"+boundary+"--\r\n").getBytes("UTF-8"));
+        }}
+          control.check();
+          int status=c.getResponseCode();if(status<200||status>=300)throw new IOException("Upload failed (HTTP "+status+").");
             JSONObject data=new JSONObject(new String(read(c.getInputStream(),1024*1024),"UTF-8"));String id=data.getString("id");
             if(!id.matches("[A-Za-z0-9._-]+"))throw new IOException("Unexpected upload response.");
             return new JSONObject().put("url",video?"https://cdn.videy.co/"+id+".mp4":"https://media.scored.co/post/"+id).put("name",name);
-        }finally{c.disconnect();}
+        }catch(Exception error){throw new IOException("Upload did not finish reliably. The service may have received the file. Check recovered upload results before uploading it again.",error);}finally{c.disconnect();}
     }
     static final class ApiError extends IOException {ApiError(String message){super(message);}}
 }
