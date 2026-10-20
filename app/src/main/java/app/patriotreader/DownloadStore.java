@@ -84,6 +84,7 @@ public final class DownloadStore {
     private final File staging;private final JSONObject records;
     private final ExecutorService publications=Executors.newSingleThreadExecutor();
     private final Set<Long> publishing=new HashSet<>();
+    private final CompletedDownloadCache<JSONObject> completed=new CompletedDownloadCache<>();
     private boolean metadataDirty;
     private Listener listener;
     private DownloadStore(Context context)throws IOException{
@@ -91,7 +92,7 @@ public final class DownloadStore {
         File directory=context.getExternalFilesDir(Environment.DIRECTORY_DOWNLOADS);
         if(directory==null)throw new IOException("Download storage is unavailable.");staging=new File(directory,"pending");
         if(!staging.isDirectory()&&!staging.mkdirs())throw new IOException("Could not prepare download storage.");
-        JSONObject loaded;try{loaded=new JSONObject(prefs.getString("records","{}"));}catch(Exception error){loaded=new JSONObject();}records=loaded;
+        JSONObject loaded;try{loaded=new JSONObject(prefs.getString("records","{}"));}catch(Exception error){throw new IOException("Saved download history could not be read. Its original record and files are preserved. Retry after storage recovers; saved files can still be managed in Android Files.",error);}records=loaded;
         // Older app versions registered only IDs. Their public destinations are never moved or removed.
         for(String value:prefs.getString("ids","").split(","))try{String id=String.valueOf(Long.parseLong(value));if(!records.has(id)){records.put(id,new JSONObject());metadataDirty=true;}}catch(Exception ignored){}
     }
@@ -110,7 +111,7 @@ public final class DownloadStore {
     }
     private static boolean publicUri(Uri uri){return "content".equals(uri.getScheme())&&"media".equals(uri.getAuthority())&&uri.getPath()!=null&&uri.getPath().matches("/(external|external_primary)/downloads/[1-9][0-9]*");}
     private void scan(WorkOwner owner,Consumer<Boolean> done){publications.execute(()->{
-        boolean success=false;try{owner.checkpoint();list(owner);success=true;}catch(Exception ignored){}
+        boolean success=false;try{owner.checkpoint();list(owner,false);success=true;}catch(Exception ignored){}
         final boolean scanned=success;publications.execute(()->{try{owner.checkpoint();boolean retry=!scanned;try{retry|=hasPendingPublication(owner);}catch(Exception uncertain){retry=true;}done.accept(retry);}catch(PublicationStopped stopped){}});
     });}
     private synchronized boolean hasPendingPublication(WorkOwner owner)throws Exception{
@@ -160,8 +161,9 @@ public final class DownloadStore {
         long id=manager.enqueue(request);record(id).put("private",true).put("stagingUri",Uri.fromFile(new File(staging,unique)).toString()).put("unmeteredOnly",unmeteredOnly);persist();schedule(context);
         return new JSONObject().put("downloadId",id);
     }
-    synchronized JSONArray list()throws Exception{return list(foreground);}
-    private synchronized JSONArray list(WorkOwner owner)throws Exception{
+    synchronized JSONArray list()throws Exception{return list(true);}
+    synchronized JSONArray list(boolean validateCompleted)throws Exception{return list(foreground,validateCompleted);}
+    private synchronized JSONArray list(WorkOwner owner,boolean validateCompleted)throws Exception{
         owner.checkpoint();Map<Long,JSONObject> rows=new HashMap<>();
         // Querying this app's system history also recovers an ID whose registration commit failed.
         try(Cursor c=manager.query(new DownloadManager.Query())){if(c==null)throw new IOException("Could not read local download history.");while(c.moveToNext()){
@@ -197,15 +199,28 @@ public final class DownloadStore {
                 if(meta.has("publicationError"))item.put("status",DownloadManager.STATUS_FAILED).put("publishingFailed",true).put("publicationError",meta.optString("publicationError"));
                 else{schedulePublication(id,owner);item.put("status",DownloadManager.STATUS_RUNNING).put("publishing",true);}
             }
+            // The queried legacy row is refreshed on every scan, so source/size/type changes
+            // invalidate its snapshot without another descriptor open. Never use this identity
+            // as ownership or as a replacement for action/preview version validation.
+            String completedIdentity=meta.has("publishedUri")?"public:"+meta.getString("publishedUri"):
+                "legacy:"+new JSONArray().put(id).put(item.optString("local")).put(item.optString("url")).put(item.optString("mime")).put(item.optLong("bytes",-1)).put(item.optLong("total",-1)).toString();
             item.remove("local");item.put("cancelable",meta.optBoolean("private")&&!publishing.contains(id)&&!meta.has("publishedUri")&&!meta.has("pendingUri"));
             if(item.optInt("status")==DownloadManager.STATUS_SUCCESSFUL){
-                try(Source source=open(id)){
-                    item.put("available",true).put("bytes",source.size).put("total",source.size).put("mime",source.mime).put("copyable",source.copyable).put("contentVersion",source.contentVersion);
-                    if(DownloadMedia.supported(source.mime)){
-                        item.put("previewUrl",Policy.ORIGIN+"/downloads/"+id+"/media?v="+source.contentVersion);
-                        if(source.mime.startsWith("video/"))item.put("posterUrl",Policy.ORIGIN+"/downloads/"+id+"/thumbnail?v="+source.contentVersion);
-                    }
-                }catch(Exception unavailable){item.put("available",false).put("copyable",false);}
+                final long completedId=id;
+                // Reuse only metadata for the same public URI or current legacy row. Actions/media still open
+                // and verify the current descriptor; explicit/foreground refresh validates all.
+                JSONObject details=completed.resolve(id,completedIdentity,validateCompleted,()->{
+                    JSONObject value=new JSONObject();
+                    try(Source source=open(completedId)){
+                        value.put("available",true).put("bytes",source.size).put("total",source.size).put("mime",source.mime).put("copyable",source.copyable).put("contentVersion",source.contentVersion);
+                        if(DownloadMedia.supported(source.mime)){
+                            value.put("previewUrl",Policy.ORIGIN+"/downloads/"+completedId+"/media?v="+source.contentVersion);
+                            if(source.mime.startsWith("video/"))value.put("posterUrl",Policy.ORIGIN+"/downloads/"+completedId+"/thumbnail?v="+source.contentVersion);
+                        }
+                    }catch(Exception unavailable){value.put("available",false).put("copyable",false);}
+                    return value;
+                });
+                Iterator<String> fields=details.keys();while(fields.hasNext()){String field=fields.next();item.put(field,details.get(field));}
             }else item.put("available",false).put("copyable",false);
             result.put(item);
         }

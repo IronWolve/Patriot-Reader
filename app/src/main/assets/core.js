@@ -1,7 +1,7 @@
 (function (root) {
   'use strict';
   const defaults = Object.freeze({theme:'dark', showAds:false, layout:'compact', textSize:17,
-    cacheMb:64, wifiDownloads:false, preload:false, autoplay:false, plainFlair:true});
+    cacheMb:64, wifiDownloads:false, preload:false, autoplay:false, plainFlair:true, nsfwMode:'show'});
   // Keep failed writes recoverable in memory; durable transactions check write's result.
   function createStore(storage) {
     const memory=new Map(),dirty=new Map(),revisions=new Map();
@@ -22,6 +22,7 @@
     catch { return ''; }
   }
   function owned(post, username) { return !!username && String(post.author).toLowerCase()===username.toLowerCase(); }
+  function isNSFW(post){return post?.is_nsfw===true;}
   function youtubeID(value) {
     try {
       const u=new URL(safeURL(value));let id='';
@@ -69,6 +70,11 @@
     if(from)params.from=from;
     return {path:`/api/v2/post/${sort}v2.json`,params};
   }
+  function searchRequest(site,community,query){
+    if(![PATRIOTS,SCORED].includes(site))throw new Error('Unsupported site.');
+    // Scored searches the network with Win; feed-view names are not communities.
+    return {path:'/api/v2/post/search.json',params:{community:site===SCORED&&scoredFeedView(community)?'Win':community,query,sort:'new'}};
+  }
   function siteOrigin(value){try{const u=new URL(safeURL(value));if(u.port&&u.port!=='443')return '';return ['patriots.win','www.patriots.win'].includes(u.hostname)?PATRIOTS:['scored.co','www.scored.co'].includes(u.hostname)?SCORED:'';}catch{return '';}}
   function postURL(post) { return `${siteOrigin(post.site)||PATRIOTS}/p/${encodeURIComponent(post.uuid || post.id)}/`; }
   function siteID(value) {
@@ -98,9 +104,18 @@
     for(const post of incoming){const key=String(post.id??post.uuid);if(seen.has(key))continue;seen.add(key);posts.push(post);added.push(post);}
     return {posts,added};
   }
+  function mergePinned(pins,posts){
+    const fresh=new Map(posts.map(p=>[String(p.id),p])),seen=new Set(),ordered=[];
+    function add(p){const id=String(p.id);if(!seen.has(id)){seen.add(id);ordered.push(p);}}
+    for(const p of pins)if(p.is_stickied===true){const value=fresh.get(String(p.id))||p;value.is_stickied=true;add(value);}
+    for(const p of posts)if(p.is_stickied===true)add(p);
+    for(const p of posts)add(p);
+    return ordered;
+  }
   function normalizeSettings(value) {
     const s={...defaults,...value};
     if(!['dark','light','system'].includes(s.theme))s.theme='dark';
+    if(!['show','blur','hide'].includes(s.nsfwMode))s.nsfwMode='show';
     s.textSize=Math.min(24,Math.max(14,Number(s.textSize)||17));
     s.cacheMb=Math.min(256,Math.max(16,Number(s.cacheMb)||64));
     return s;
@@ -132,7 +147,7 @@
     }
     services.remember(null);return {post,pendingFlair:false};
   }
-  const api={PATRIOTS,SCORED,siteOrigin,scoredFeedView,feedRequest,defaults,createStore,cleanFlair,safeURL,owned,media,preview,youtubeID,truthID,rumbleURL,postURL,siteID,readerLink,commentURL,mergeComments,mergePosts,normalizeSettings,validateDraft,publish};
+  const api={PATRIOTS,SCORED,siteOrigin,scoredFeedView,feedRequest,searchRequest,defaults,createStore,cleanFlair,safeURL,owned,isNSFW,media,preview,youtubeID,truthID,rumbleURL,postURL,siteID,readerLink,commentURL,mergeComments,mergePosts,mergePinned,normalizeSettings,validateDraft,publish};
   if(typeof module!=='undefined' && module.exports)module.exports=api;
   root.ReaderCore=api;
 })(typeof globalThis!=='undefined'?globalThis:this);

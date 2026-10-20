@@ -18,6 +18,7 @@
     user:'M16 7a4 4 0 1 1-8 0 4 4 0 0 1 8 0M4 21v-2a8 8 0 0 1 16 0v2',
     communities:'M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2M16 3a4 4 0 0 1 0 8M22 21v-2a4 4 0 0 0-3-3.87M13 7a4 4 0 1 1-8 0 4 4 0 0 1 8 0',
     star:'m12 3 2.8 5.7 6.2.9-4.5 4.4 1.1 6.2-5.6-2.9-5.6 2.9 1.1-6.2L3 9.6l6.2-.9Z',
+    pin:'M8 3h8v2h-1v5l3 3v2h-5v6l-1 2-1-2v-6H6v-2l3-3V5H8Z',
     settings:'M4 7h16M4 17h16M8 4v6M16 14v6',download:'M12 3v12m-5-5 5 5 5-5M4 16v5h16v-5',
     close:'m6 6 12 12M6 18 18 6',comment:'M4 4h16v12H9l-5 4Z',
     bookmark:'M6 3h12v18l-6-4-6 4Z',share:'M12 15V3m-4 4 4-4 4 4M5 12v9h14v-9',copy:'M9 9h11v12H9ZM5 16H3V3h12v2',
@@ -121,12 +122,12 @@
   });
   function theme(){const dark=state.settings.theme==='dark'||state.settings.theme==='system'&&state.systemDark;document.documentElement.dataset.theme=dark?'dark':'light';document.documentElement.style.setProperty('--font',state.settings.textSize+'px');}
   async function saveSettings(){state.settings=C.normalizeSettings(state.settings);theme();await rpc('settings',state.settings);}
-  function accountChanged(username,restored=null,needsReset=false){const previousUser=state.username;state.accountEpoch++;state.sessionNeedsReset=needsReset;state.username=username||'';if(state.site===C.SCORED&&previousUser!==state.username&&C.scoredFeedView(state.community))state.community=selectedCommunity();state.feed=restored?.feed||[];state.more=restored?.more||false;state.feedCached=restored?.feedCached||null;state.searchModel=null;state.profileModel=null;state.profileModels={};state.profileUser='';state.threadModel=null;state.inboxModel=null;state.inboxTab='all';state.savedModel=null;state.savedTab=state.username?'website':'device';state.message=null;state.blocked=readLocal(ownKey('blocked'),[]);state.stack=[];state.sequence++;navigate('feed',false);if(restored?.feed.length)restoreScroll(restored,state.sequence);loadAccountPreferences();syncWebsiteSaves(true);reconcileUploads();}
-  function navigation(page,push=true){if(state.page==='feed'){state.feedScroll=scrollY;state.feedAnchor=scrollAnchor();}activeListCleanup?.();activeListCleanup=null;replyCleanup?.();replyCleanup=null;restoreCleanup?.();restoreCleanup=null;closeDropdown();feedObserver.disconnect();feedBusy=false;feedLoad++;if(push)state.stack.push({page:state.page,community:state.community,sort:state.sort,topRange:state.topRange,feed:state.feed,more:state.more,feedCached:state.feedCached,searchModel:state.searchModel,scroll:window.scrollY,post:state.post,query:state.query,threadFocus:state.threadFocus,threadTarget:state.threadTarget,threadModel:state.threadModel,profileUser:state.profileUser,profileTab:state.profileTab,profileModels:state.profileModels,inboxTab:state.inboxTab,inboxModel:state.inboxModel,message:state.message,anchor:scrollAnchor()});state.sequence++;state.page=page;clearTimeout(downloadTimer);downloadTimer=null;refreshDownloads=null;refreshUploadResults=null;refreshUploadStatus=null;
+  function accountChanged(username,restored=null,needsReset=false){const previousUser=state.username;state.accountEpoch++;state.sessionNeedsReset=needsReset;state.username=username||'';if(previousUser!==state.username){pinFeeds.clear();nsfwRevealed.clear();}state.feedCursor=restored?.feedCursor||'';state.pinWarning='';if(state.site===C.SCORED&&previousUser!==state.username&&C.scoredFeedView(state.community))state.community=selectedCommunity();state.feed=restored?.feed||[];state.more=restored?.more||false;state.feedCached=restored?.feedCached||null;state.searchModel=null;state.profileModel=null;state.profileModels={};state.profileUser='';state.threadModel=null;state.inboxModel=null;state.inboxTab='all';state.savedModel=null;state.savedTab=state.username?'website':'device';state.message=null;state.blocked=readLocal(ownKey('blocked'),[]);state.stack=[];state.sequence++;navigate('feed',false);if(restored?.feed.length)restoreScroll(restored,state.sequence);loadAccountPreferences();syncWebsiteSaves(true);reconcileUploads();}
+  function navigation(page,push=true){if(state.page==='feed'){state.feedScroll=scrollY;state.feedAnchor=scrollAnchor();}activeListCleanup?.();activeListCleanup=null;replyCleanup?.();replyCleanup=null;restoreCleanup?.();restoreCleanup=null;closeDropdown();feedObserver.disconnect();feedBusy=false;feedLoad++;if(push)state.stack.push({page:state.page,community:state.community,sort:state.sort,topRange:state.topRange,feed:state.feed,more:state.more,feedCached:state.feedCached,feedCursor:state.feedCursor,pinWarning:state.pinWarning,searchModel:state.searchModel,scroll:window.scrollY,post:state.post,query:state.query,threadFocus:state.threadFocus,threadTarget:state.threadTarget,threadModel:state.threadModel,profileUser:state.profileUser,profileTab:state.profileTab,profileModels:state.profileModels,inboxTab:state.inboxTab,inboxModel:state.inboxModel,message:state.message,anchor:scrollAnchor()});state.sequence++;state.page=page;clearTimeout(downloadTimer);downloadTimer=null;refreshDownloads=null;refreshUploadResults=null;refreshUploadStatus=null;
     updateHeader();
     document.querySelectorAll('#nav button').forEach(n=>{if(n.dataset.page===page)n.setAttribute('aria-current','page');else n.removeAttribute('aria-current');});window.scrollTo(0,0);}
   function navigate(page,push=true){navigation(page,push);return ({feed:feedPage,communities:communitiesPage,search:searchPage,compose:composePage,profile:profilePage,settings:settingsPage,downloads:downloadsPage,saved:savedPage,inbox:inboxPage,message:messagePage,thread:()=>threadPage(state.post)}[page]||feedPage)();}
-  function back(){if($('#dropdown').open){closeDropdown();return;}if($('#sheet').open){closeSheet();return;}const previous=state.stack.pop();if(previous){state.community=previous.community||state.community;remember(communityPref(),state.community);if(previous.sort){state.sort=previous.sort;state.topRange=previous.topRange||'day';remember(sitePref('sort'),state.sort);remember(sitePref('topRange'),state.topRange);}state.feed=previous.feed||[];state.more=previous.more||false;state.feedCached=previous.feedCached;state.searchModel=previous.searchModel;state.post=previous.post;state.query=previous.query;state.threadFocus=previous.threadFocus;for(const key of ['threadTarget','threadModel','profileUser','profileTab','profileModels','inboxTab','inboxModel','message'])state[key]=previous[key];state.returning=previous.page==='thread';const task=navigate(previous.page,false),seq=state.sequence;Promise.resolve(task).then(()=>{if(seq===state.sequence)restoreScroll(previous,seq);});}
+  function back(){if($('#dropdown').open){closeDropdown();return;}if($('#sheet').open){closeSheet();return;}const previous=state.stack.pop();if(previous){state.community=previous.community||state.community;remember(communityPref(),state.community);if(previous.sort){state.sort=previous.sort;state.topRange=previous.topRange||'day';remember(sitePref('sort'),state.sort);remember(sitePref('topRange'),state.topRange);}state.feed=previous.feed||[];state.more=previous.more||false;state.feedCached=previous.feedCached;state.feedCursor=previous.feedCursor||'';state.pinWarning=previous.pinWarning||'';state.searchModel=previous.searchModel;state.post=previous.post;state.query=previous.query;state.threadFocus=previous.threadFocus;for(const key of ['threadTarget','threadModel','profileUser','profileTab','profileModels','inboxTab','inboxModel','message'])state[key]=previous[key];state.returning=previous.page==='thread';const task=navigate(previous.page,false),seq=state.sequence;Promise.resolve(task).then(()=>{if(seq===state.sequence)restoreScroll(previous,seq);});}
     else if(state.page!=='feed')navigate('feed',false);else if(store.pending().length)sheet('Changes are not saved',el('div',{},text('p','Keep the app open until saving succeeds, or copy the unsaved data before leaving.'),button('Retry saving',retryStorage),button('Copy unsaved data',()=>action(copyRecovery))));else rpc('exit').catch(()=>{});}
   function scrollAnchor(){const nodes=[...main.querySelectorAll('[data-comment-id],[data-post-id]')],node=nodes.find(n=>n.getBoundingClientRect().bottom>54);return node?{kind:node.hasAttribute('data-comment-id')?'data-comment-id':'data-post-id',id:node.getAttribute(node.hasAttribute('data-comment-id')?'data-comment-id':'data-post-id'),top:node.getBoundingClientRect().top}:null;}
   function restoreScroll(previous,seq){
@@ -197,25 +198,49 @@
   });}
   function voteControls(p,isPost=true){const up=iconButton('up','Upvote',e=>vote(p,0,isPost,e.currentTarget),'vote'),down=iconButton('down','Downvote',e=>vote(p,1,isPost,e.currentTarget),'vote');up.dataset.direction='0';down.dataset.direction='1';
     const key=voteKey(p,isPost);up.disabled=down.disabled=voteWrites.has(key);up.setAttribute('aria-pressed',String(p.vote_state===0));down.setAttribute('aria-pressed',String(p.vote_state===1));const group=el('div',{class:'vote-group',role:'group','aria-label':'Vote','data-vote':p.vote_state??2,'data-vote-key':key},up,text('span',Number(p.score||0).toLocaleString(),'score'),down);group.voteItem=p;return [group];}
+  const nsfwRevealed=new Set(),nsfwKey=p=>JSON.stringify([p.site||state.site,String(p.id||p.uuid)]);
+  const nsfwConcealed=p=>C.isNSFW(p)&&state.settings.nsfwMode!=='show'&&!nsfwRevealed.has(nsfwKey(p));
+  function nsfwCover(p,reveal,compact=false){
+    const media=C.media(p),preview=C.preview(p),tweet=p.link_metadata?.twitter;
+    const url=C.safeURL(p.preview)||C.safeURL(p.link_metadata?.image)||C.safeURL(tweet?.video?.preview)||C.safeURL(tweet?.images?.[0]?.url)||(preview.kind==='youtube'?preview.image:'')||(media.kind==='image'?media.url:'');
+    const box=el('div',{class:'nsfw-cover'+(compact?' nsfw-thumb':'')});
+    if(url){const image=previewImage(url,'','nsfw-blurred-image');image.setAttribute('aria-hidden','true');box.append(image);}
+    const show=button('',reveal,'nsfw-reveal');show.setAttribute('aria-label','Reveal NSFW content');show.append(text('strong','NSFW'),text('span',compact?'Show':'Tap to reveal'));box.append(show);return box;
+  }
   function postCard(p,detail=false,bookmarkOwner=state.username){p.site=p.site||state.site;
-    if(isBlocked(p.author))return el('article',{class:'blocked-post',hidden:true});
-    const m=C.media(p),card=el('article',{class:'post '+(detail||state.settings.layout==='cards'?'card':'compact'),'data-post-id':p.id});
+    if(isBlocked(p.author))return el('article',{class:'blocked-post',hidden:true,'data-post-id':p.id});
+    const flagged=C.isNSFW(p),concealed=nsfwConcealed(p);let card;
+    function reveal(){
+      if(!card?.isConnected)return;nsfwRevealed.add(nsfwKey(p));while(nsfwRevealed.size>256)nsfwRevealed.delete(nsfwRevealed.values().next().value);
+      if(detail&&state.page==='thread'&&String(state.threadModel?.post.id)===String(p.id)){
+        renderThread(state.threadModel);if(state.threadFocus==='comments')requestAnimationFrame(()=>{const target=state.threadTarget&&[...main.querySelectorAll('[data-comment-id]')].find(n=>n.dataset.commentId===String(state.threadTarget));if(target)target.scrollIntoView({block:'start'});else scrollToComments();});
+      }else{releaseMedia(card);card.replaceWith(postCard(p,detail,bookmarkOwner));}
+    }
+    if(flagged&&state.settings.nsfwMode==='hide'&&(!detail||concealed)){
+      card=el('article',{class:detail?'post nsfw-hidden-detail':'blocked-post nsfw-hidden',hidden:!detail,'data-post-id':p.id});
+      if(detail)card.append(text('h1','NSFW post hidden'),text('p','Your NSFW setting hides this post.','muted'),button('Show this post',reveal,'primary'));return card;
+    }
+    const m=C.media(p);card=el('article',{class:'post '+(detail||state.settings.layout==='cards'?'card':'compact'),'data-post-id':p.id});
     const title=detail?text('h1',p.title):button(p.title,()=>openPost(p),'post-title');
     const community=state.site===C.SCORED&&p.community?button('c/'+p.community,()=>changeCommunity(p.community),'community-link'):null;
-    const meta=el('div',{class:'meta'},community,authorLink(p.author),p.author_flair_text?el('span',{class:'flair',title:'User flair'},C.cleanFlair(p.author_flair_text)):null,text('span',ago(p.created)),p.is_stickied?text('span','Pinned','pin'):null,p.domain?text('span',p.domain):null);
+    const meta=el('div',{class:'meta'},community,authorIdentity(p),flagged?text('span','NSFW','nsfw-label'):null,p.author_flair_text?el('span',{class:'flair',title:'User flair'},C.cleanFlair(p.author_flair_text)):null,text('span',ago(p.created)),p.domain?text('span',p.domain):null);
     const copy=el('div',{class:'post-copy'},title,flair(p),meta);
     const top=el('div',{class:'post-top'},copy);if(!detail&&state.settings.layout==='compact'&&m.kind==='image'){
-      const img=el('img',{class:'thumb',src:m.url,alt:'Post image',loading:'lazy',referrerpolicy:'no-referrer'});imageOpener(img,m.url,p.title);top.append(img);
+      if(concealed)top.append(nsfwCover(p,reveal,true));
+      else{const img=el('img',{class:'thumb',src:m.url,alt:'Post image',loading:'lazy',referrerpolicy:'no-referrer'});imageOpener(img,m.url,p.title);top.append(img);}
     }card.append(top);
     const discussionURL=C.postURL(p);
-    if(detail&&postText(p))card.append(richContent(p.content,p.raw_content,'content',discussionURL));
     const embedded=C.preview(p);
-    if(['twitter','youtube','rumble','truth','article'].includes(embedded.kind))card.append(linkPreview(embedded,p,detail));
-    else if((detail||state.settings.layout==='cards')&&m.kind!=='link')card.append(mediaView(m,p.title,{url:C.safeURL(p.link)||m.url,postURL:discussionURL}));
-    else if(m.kind!=='link')card.append(sourceToolbar(C.safeURL(p.link)||m.url,discussionURL));
+    if(concealed){if(!(m.kind==='image'&&!detail&&state.settings.layout==='compact')&&(detail||embedded.kind!=='none'||m.kind!=='link'))card.append(nsfwCover(p,reveal));}
+    else{
+      if(detail&&postText(p))card.append(richContent(p.content,p.raw_content,'content',discussionURL));
+      if(['twitter','youtube','rumble','truth','article'].includes(embedded.kind))card.append(linkPreview(embedded,p,detail));
+      else if((detail||state.settings.layout==='cards')&&m.kind!=='link')card.append(mediaView(m,p.title,{url:C.safeURL(p.link)||m.url,postURL:discussionURL}));
+      else if(m.kind!=='link')card.append(sourceToolbar(C.safeURL(p.link)||m.url,discussionURL));
+    }
     const saved=bookmarkIDs(bookmarkOwner).has(String(p.id))||(state.page==='saved'&&state.savedTab==='website');
     const save=iconButton('bookmark',saved?'Unsave post':'Save post',e=>action(()=>toggleSaved(p,bookmarkOwner,e.currentTarget),e.currentTarget),'action-icon save-post');save.setAttribute('aria-pressed',String(saved));
-    const comments=button('',()=>{if(detail)scrollToComments();else openPost(p,'comments');},'comment-count');comments.setAttribute('aria-label',`${p.comments||0} comments`);comments.append(icon('comment'),text('span',Number(p.comments||0).toLocaleString()));
+    const comments=button('',()=>{if(detail&&concealed){state.threadFocus='comments';reveal();}else if(detail)scrollToComments();else openPost(p,'comments');},'comment-count');comments.setAttribute('aria-label',`${p.comments||0} comments`);comments.append(icon('comment'),text('span',Number(p.comments||0).toLocaleString()));
     const actions=el('div',{class:'actions post-actions'},...voteControls(p),comments,el('span',{class:'action-spacer'}),save,iconButton('more','Post actions',e=>postMenu(p,e.currentTarget),'action-icon'));
     card.append(actions);return card;
   }
@@ -342,16 +367,19 @@
     const feedback=el('div',{class:'image-feedback',role:'status'},'Loading image…');
     const actionStatus=text('p','','image-action-status'),snapshotNotice=el('div',{class:'image-snapshot-notice',role:'status',hidden:true});actionStatus.setAttribute('role','status');actionStatus.setAttribute('aria-live','polite');
     let viewerToken,stale=false,staleKey='',latestLocal=localDownload;const actionButtons=[];
-    const view=el('div',{class:'image-view',tabindex:'0',role:'group','aria-label':'Image viewer. Pinch or double-tap to zoom; drag to pan.'},image,feedback);
+    const view=el('div',{class:'image-view',tabindex:'0',role:'group','aria-label':'Image viewer. Pinch to zoom the page. Use Zoom or double-click to enlarge the image; drag to pan.'},image,feedback);
     const controller=new AbortController(),listeners={signal:controller.signal},points=new Map();
-    let scale=1,x=0,y=0,baseWidth=0,baseHeight=0,gesture=null,tap=null,lastTap=null,loaded=false;
+    let scale=1,x=0,y=0,baseWidth=0,baseHeight=0,gesture=null,tap=null,lastTap=null,loaded=false,nativeGesture=false;
+    const pageZoomed=()=>(window.visualViewport?.scale||1)>1.01;
+    function touchPolicy(){view.style.touchAction=scale>1&&!pageZoomed()?'pinch-zoom':'auto';}
+    window.visualViewport?.addEventListener('resize',touchPolicy,listeners);
     const clamp=(v,min,max)=>Math.min(max,Math.max(min,v));
     const zoom=button('Zoom',()=>zoomAt(scale>1?1:2.5,view.clientWidth/2,view.clientHeight/2));zoom.disabled=true;
     function render(){
       const maxX=Math.max(0,(baseWidth*scale-view.clientWidth)/2),maxY=Math.max(0,(baseHeight*scale-view.clientHeight)/2);
       x=clamp(x,-maxX,maxX);y=clamp(y,-maxY,maxY);
       image.style.transform=`translate(${(view.clientWidth-baseWidth*scale)/2+x}px,${(view.clientHeight-baseHeight*scale)/2+y}px) scale(${scale})`;
-      view.dataset.zoom=String(scale);view.classList.toggle('zoom',scale>1);zoom.textContent=scale>1?'Fit image':'Zoom';
+      view.dataset.zoom=String(scale);view.classList.toggle('zoom',scale>1);zoom.textContent=scale>1?'Fit image':'Zoom';touchPolicy();
     }
     function zoomAt(next,px,py){
       if(!loaded)return;next=clamp(next,1,8);const ratio=next/scale;
@@ -365,43 +393,42 @@
       for(let n=0;n<2;n++){const chrome=dialog.querySelector('.sheet-head').offsetHeight+dialog.querySelector('.image-footer').offsetHeight;ratio=Math.min(width/image.naturalWidth,Math.max(44,innerHeight-chrome-14)/image.naturalHeight,1);dialog.style.setProperty('--image-width',Math.min(width+2,Math.max(220,Math.ceil(image.naturalWidth*ratio)+2))+'px');}
       baseWidth=image.naturalWidth*ratio;baseHeight=image.naturalHeight*ratio;
       view.style.height=baseHeight+'px';image.style.width=baseWidth+'px';image.style.height=baseHeight+'px';
-      scale=preserveZoom?priorScale:1;x=preserveZoom?(.5-focusX)*baseWidth*scale:0;y=preserveZoom?(.5-focusY)*baseHeight*scale:0;points.clear();gesture=tap=lastTap=null;render();
+      scale=preserveZoom?priorScale:1;x=preserveZoom?(.5-focusX)*baseWidth*scale:0;y=preserveZoom?(.5-focusY)*baseHeight*scale:0;points.clear();nativeGesture=false;gesture=tap=lastTap=null;render();
     }
     function local(e){const r=view.getBoundingClientRect();return {x:e.clientX-r.left,y:e.clientY-r.top};}
     function begin(){
       const p=[...points.values()];gesture=p.length?{points:p.map(v=>({...v})),scale,x,y}:null;
     }
     view.addEventListener('pointerdown',e=>{
-      if(!loaded||e.button>0)return;e.preventDefault();view.focus({preventScroll:true});view.setPointerCapture(e.pointerId);
-      const p=local(e);points.set(e.pointerId,p);tap=points.size===1?{...p,id:e.pointerId,time:performance.now()}:null;
+      if(!loaded||e.button>0)return;const p=local(e);points.set(e.pointerId,p);
+      // Touch pinch always belongs to the browser's page zoom, even after using
+      // the explicit image Zoom button. Only single-finger image panning is ours.
+      if(e.pointerType==='touch'&&(points.size>1||nativeGesture||pageZoomed()||scale===1)){nativeGesture=true;gesture=tap=lastTap=null;return;}
+      e.preventDefault();view.focus({preventScroll:true});view.setPointerCapture(e.pointerId);
+      tap=e.pointerType!=='touch'&&points.size===1?{...p,id:e.pointerId,time:performance.now()}:null;
       if(points.size>1)lastTap=null;begin();
     },listeners);
     view.addEventListener('pointermove',e=>{
-      if(!points.has(e.pointerId)||!gesture)return;e.preventDefault();const p=local(e);points.set(e.pointerId,p);
+      if(!points.has(e.pointerId))return;const p=local(e);points.set(e.pointerId,p);
+      if(nativeGesture||points.size>1||!gesture||e.pointerType==='touch'&&pageZoomed())return;e.preventDefault();
       if(tap&&Math.hypot(p.x-tap.x,p.y-tap.y)>8)tap=null;
       const current=[...points.values()],start=gesture.points;
-      if(current.length>=2&&start.length>=2){
-        const distance=Math.hypot(start[1].x-start[0].x,start[1].y-start[0].y);
-        const next=clamp(gesture.scale*Math.hypot(current[1].x-current[0].x,current[1].y-current[0].y)/Math.max(1,distance),1,8),ratio=next/gesture.scale;
-        const sx=(start[0].x+start[1].x)/2-view.clientWidth/2,sy=(start[0].y+start[1].y)/2-view.clientHeight/2;
-        x=(current[0].x+current[1].x)/2-view.clientWidth/2-(sx-gesture.x)*ratio;
-        y=(current[0].y+current[1].y)/2-view.clientHeight/2-(sy-gesture.y)*ratio;scale=next;
-      }else{x=gesture.x+current[0].x-start[0].x;y=gesture.y+current[0].y-start[0].y;}
+      x=gesture.x+current[0].x-start[0].x;y=gesture.y+current[0].y-start[0].y;
       render();
     },listeners);
     function finish(e){
       if(!points.has(e.pointerId))return;
-      if(e.type==='pointerup'&&tap?.id===e.pointerId&&performance.now()-tap.time<300){
+      if(e.type==='pointerup'&&!nativeGesture&&tap?.id===e.pointerId&&performance.now()-tap.time<300){
         const p=local(e),now=performance.now();
         if(lastTap&&now-lastTap.time<330&&Math.hypot(p.x-lastTap.x,p.y-lastTap.y)<30){zoomAt(scale>1?1:2.5,p.x,p.y);lastTap=null;}
         else lastTap={...p,time:now};
       }
-      tap=null;points.delete(e.pointerId);begin();
+      tap=null;points.delete(e.pointerId);if(!points.size)nativeGesture=false;if(nativeGesture)gesture=null;else begin();
     }
     for(const event of ['pointerup','pointercancel','lostpointercapture'])view.addEventListener(event,finish,listeners);
-    view.addEventListener('wheel',e=>{if(!loaded)return;e.preventDefault();const p=local(e);if(e.ctrlKey)zoomAt(scale*Math.exp(-e.deltaY*.01),p.x,p.y);else if(scale>1){x-=e.deltaX;y-=e.deltaY;render();}},{...listeners,passive:false});
+    view.addEventListener('wheel',e=>{if(!loaded||e.ctrlKey||e.metaKey||scale<=1||pageZoomed())return;e.preventDefault();x-=e.deltaX;y-=e.deltaY;render();},{...listeners,passive:false});
     view.addEventListener('keydown',e=>{
-      if(!loaded)return;if(['+','=','-','0','ArrowLeft','ArrowRight','ArrowUp','ArrowDown'].includes(e.key))e.preventDefault();
+      if(!loaded||e.ctrlKey||e.metaKey)return;if(['+','=','-','0','ArrowLeft','ArrowRight','ArrowUp','ArrowDown'].includes(e.key))e.preventDefault();
       if(e.key==='+'||e.key==='=')zoomAt(scale*1.5,view.clientWidth/2,view.clientHeight/2);
       else if(e.key==='-')zoomAt(scale/1.5,view.clientWidth/2,view.clientHeight/2);
       else if(e.key==='0')zoomAt(1,view.clientWidth/2,view.clientHeight/2);
@@ -471,6 +498,12 @@
     choose.append(text('span',items.find(([v])=>v===current())?.[1]||current()),icon('chevron'));return choose;
   }
   function authorLink(user){const b=button('u/'+(user||'[deleted]'),()=>openProfile(user),'author-link');b.setAttribute('aria-label','View profile: '+user);return b;}
+  function authorIdentity(item){
+    const identity=el('span',{class:'author-identity'},authorLink(item.author));
+    if(item.is_moderator===true)identity.append(el('span',{class:'moderator-label',title:'Moderator'},'Mod'));
+    if(item.is_stickied===true)identity.append(el('span',{class:'post-pin',role:'img','aria-label':'Pinned',title:'Pinned'},icon('pin')));
+    return identity;
+  }
   function openProfile(user){if(!/^[A-Za-z0-9_-]{1,64}$/.test(user||''))return;if($('#sheet').open)closeSheet();state.profileUser=user;state.profileTab='overview';state.profileModels={};return navigate('profile');}
   function isBlocked(user){return (Array.isArray(state.blocked)?state.blocked:[]).some(name=>String(name).toLowerCase()===String(user).toLowerCase());}
   async function followLink(url){const target=C.readerLink(url);if(!target)return rpc('external',{url});
@@ -527,7 +560,7 @@
   function contentKey(item){return (item.post_title||item.parent_id?'comment:':'post:')+item.id;}
   function commentSummary(c){if(isBlocked(c.author))return el('div',{hidden:true});
     const post={id:c.parent_id,uuid:c.parent_uuid||c.post_uuid,title:c.post_title||'Discussion',community:c.community,site:state.site},box=el('article',{class:'post profile-comment','data-comment-id':c.id});
-    box.append(button(c.post_title||'View discussion',()=>openPost(post,'comments',String(c.id)),'post-title'),el('div',{class:'meta'},authorLink(c.author),text('span',ago(c.created))),richContent(c.content,c.raw_content,'comment-body',C.postURL(post)),el('div',{class:'actions'},...voteControls(c,false),button('Open comment',()=>openPost(post,'comments',String(c.id))),iconButton('more','Comment actions',e=>commentMenu(c,post,e.currentTarget))));return box;
+    box.append(button(c.post_title||'View discussion',()=>openPost(post,'comments',String(c.id)),'post-title'),el('div',{class:'meta'},authorIdentity(c),text('span',ago(c.created))),richContent(c.content,c.raw_content,'comment-body',C.postURL(post)),el('div',{class:'actions'},...voteControls(c,false),button('Open comment',()=>openPost(post,'comments',String(c.id))),iconButton('more','Comment actions',e=>commentMenu(c,post,e.currentTarget))));return box;
   }
   function pagedItems(container,path,params,model,valid,field,render,key=contentKey){
     let busy=false,active=true;const alive=()=>active&&valid(),observer=new IntersectionObserver(entries=>{if(entries.some(e=>e.isIntersecting))load();},{rootMargin:'0px 0px 350px 0px'});activeListCleanup=()=>{active=false;observer.disconnect();};
@@ -543,7 +576,7 @@
   }
   let pull=null,pullBusy=false;const pullStatus=text('div','','pull-status');pullStatus.setAttribute('role','status');pullStatus.hidden=true;document.body.append(pullStatus);
   function resetPull(){pull=null;if(!pullBusy)pullStatus.hidden=true;}
-  async function refreshCurrent(){if(state.page==='feed')return loadFeed(false);if(state.page==='thread')return threadPage(state.post);if(state.page==='profile'){state.profileModels={};return profilePage();}if(state.page==='inbox'){state.inboxModel=null;return inboxPage();}}
+  async function refreshCurrent(){if(state.page==='feed')return loadFeed(false,null,true);if(state.page==='thread')return threadPage(state.post);if(state.page==='profile'){state.profileModels={};return profilePage();}if(state.page==='inbox'){state.inboxModel=null;return inboxPage();}}
   main.addEventListener('touchstart',e=>{if(pullBusy||scrollY>0||e.touches.length!==1||document.querySelector('dialog[open]')||!['feed','thread','profile','inbox'].includes(state.page)||e.target.closest('input,textarea,select,video,audio,iframe,.image-open,.sort-control,.top-range'))return;pull={x:e.touches[0].clientX,y:e.touches[0].clientY,distance:0,seq:state.sequence};},{passive:true});
   main.addEventListener('touchmove',e=>{if(!pull)return;if(e.touches.length!==1||pull.seq!==state.sequence){resetPull();return;}const dx=e.touches[0].clientX-pull.x,dy=e.touches[0].clientY-pull.y;if(dy<0||Math.abs(dx)>Math.max(12,dy)){resetPull();return;}if(scrollY>0){resetPull();return;}if(dy>10){if(e.cancelable)e.preventDefault();pull.distance=dy;pullStatus.hidden=false;pullStatus.textContent=dy>=72?'Release to refresh':'Pull to refresh';}},{passive:false});
   main.addEventListener('touchend',()=>{const refresh=pull&&pull.distance>=72&&pull.seq===state.sequence;resetPull();if(refresh){pullBusy=true;pullStatus.hidden=false;pullStatus.textContent='Refreshing…';Promise.resolve(refreshCurrent()).catch(error=>toast(error.message)).finally(()=>{pullBusy=false;pullStatus.hidden=true;});}},{passive:true});main.addEventListener('touchcancel',resetPull,{passive:true});
@@ -565,7 +598,7 @@
   }
   async function switchSite(site,community){
     if(![C.PATRIOTS,C.SCORED].includes(site))throw new Error('Unsupported site.');
-    if(site===state.site){if(community&&community!==state.community)return changeCommunity(community);if(site===C.SCORED&&!C.scoredFeedView(state.community))return changeCommunity(defaultScoredFeed());if(state.page!=='feed'){state.feed=[];state.more=false;state.feedCached=null;return navigate('feed');}return loadFeed(false);}
+    if(site===state.site){if(community&&community!==state.community)return changeCommunity(community);if(site===C.SCORED&&!C.scoredFeedView(state.community))return changeCommunity(defaultScoredFeed());if(state.page!=='feed'){state.feed=[];state.more=false;state.feedCached=null;return navigate('feed');}return loadFeed(false,null,true);}
     const selection=++siteSelection;$('#site-choice').disabled=true;
     try{const data=await rpc('selectSite',{site});if(selection!==siteSelection)return;
       if(data.site!==site)throw new Error('The site could not be selected.');
@@ -701,20 +734,47 @@
     const layout=iconButton(state.settings.layout==='compact'?'grid':'list',state.settings.layout==='compact'?'Switch to image cards':'Switch to compact posts',()=>action(async()=>{const seq=state.sequence,site=state.site;state.settings.layout=state.settings.layout==='compact'?'cards':'compact';await saveSettings();if(seq===state.sequence&&site===state.site&&state.page==='feed')feedPage();}));
     const range=sortPicker('Top posts period',topRanges,state.topRange||'day',value=>{state.topRange=value;remember(sitePref('topRange'),value);state.feed=[];state.more=false;state.feedCached=null;feedPage();},'top-range');range.hidden=state.sort!=='top';
     if(scored)return el('div',{class:'toolbar feed-toolbar scored-toolbar'},tabs,sort,range);
-    return el('div',{class:'toolbar feed-toolbar'},sort,range,el('span',{class:'action-spacer'}),layout,iconButton('refresh','Refresh feed',()=>loadFeed(false)));
+    return el('div',{class:'toolbar feed-toolbar'},sort,range,el('span',{class:'action-spacer'}),layout,iconButton('refresh','Refresh feed',()=>loadFeed(false,null,true)));
   }
-  function feedPage(){replace(main,feedToolbar(),...(state.feed.length?state.feed.map(p=>postCard(p)):[text('div','Loading posts…','spinner')]));if(state.feed.length){if(state.feedCached)main.insertBefore(cachedNotice(state.feedCached),main.children[1]);addMore();}else loadFeed(false);}
+  const pinFeeds=new Map();
+  async function feedPins(owner,community,sort,result,force,current,append){
+    const view=owner.site===C.SCORED?C.scoredFeedView(community):'',key=JSON.stringify([owner.site,owner.user.toLowerCase(),view?'@scored':community.toLowerCase()]),source=view||community.toLowerCase();
+    let bucket=pinFeeds.get(key)||new Map(),entry=bucket.get(source),hot=result,warning='';
+    const age=entry?Date.now()-entry.savedAt:Infinity,primaryHot=sort==='hot'&&!append;
+    try{
+      if(!primaryHot&&(force||age>60000)){const request=C.feedRequest(owner.site,community,'hot');hot=await api(request.path,request.params,'GET',owner.user,owner.site);if(!current())return null;}
+      if(primaryHot||force||age>60000){
+        if(!Array.isArray(hot.data.posts))throw new Error('Pinned posts unavailable.');
+        if(force)bucket=new Map();
+        entry={posts:hot.data.posts.filter(p=>p.is_stickied===true),savedAt:hot.cached?Number(hot.savedAt)||0:Date.now()};bucket.set(source,entry);
+        if(hot.cached)warning='Showing saved pinned posts.';
+      }
+    }catch{warning='Couldn’t refresh pinned posts.';}
+    if(!current())return null;
+    const incoming=result.data.posts||[],released=new Set(incoming.filter(p=>p.is_stickied===false).map(p=>String(p.id)));
+    for(const value of bucket.values())value.posts=value.posts.filter(p=>!released.has(String(p.id)));
+    const found=incoming.filter(p=>p.is_stickied===true);
+    if(found.length){entry=bucket.get(source)||{posts:[],savedAt:Date.now()};entry.posts=C.mergePosts(entry.posts,found).posts;bucket.set(source,entry);}
+    pinFeeds.delete(key);pinFeeds.set(key,bucket);while(pinFeeds.size>16)pinFeeds.delete(pinFeeds.keys().next().value);
+    const pins=[];for(const[name,value]of bucket)if(name===source||Date.now()-value.savedAt<=60000)pins.push(...value.posts);
+    return {posts:C.mergePosts([],pins).posts,warning};
+  }
+  function pinNotice(){return state.pinWarning?el('div',{class:'pin-notice'},text('span',state.pinWarning),button('Retry',()=>loadFeed(false,null,true),'secondary')):null;}
+  function feedPage(){replace(main,feedToolbar(),pinNotice(),...(state.feed.length?state.feed.map(p=>postCard(p)):[text('div','Loading posts…','spinner')]));if(state.feed.length){if(state.feedCached)main.insertBefore(cachedNotice(state.feedCached),main.children[1]);addMore();}else loadFeed(false);}
   const feedObserver=new IntersectionObserver(entries=>{for(const entry of entries)if(entry.isIntersecting&&state.page==='feed'&&state.more&&!feedBusy){feedObserver.unobserve(entry.target);loadFeed(true,entry.target);}},{rootMargin:'0px 0px 500px 0px'});
-  function addMore(){feedObserver.disconnect();main.querySelector('.feed-tail')?.remove();if(state.more){const tail=text('div','Loading more posts…','feed-tail');tail.setAttribute('role','status');main.append(tail);feedObserver.observe(tail);}else if(state.feed.length)main.append(text('p','You’re caught up.','feed-tail'));}
-  async function loadFeed(append,node){if(append&&feedBusy)return;const seq=state.sequence,load=++feedLoad;feedBusy=true;if(node)node.disabled=true;try{
-      const request=C.feedRequest(state.site,state.community,state.sort,state.topRange||'day',append&&state.feed.length?state.feed.at(-1).uuid:'');
-      const result=await api(request.path,request.params);if(seq!==state.sequence||state.page!=='feed'||load!==feedLoad)return;
-      const merged=C.mergePosts(append?state.feed:[],result.data.posts||[]);state.feed=merged.posts;
+  function addMore(){feedObserver.disconnect();main.querySelector('.feed-tail')?.remove();if(state.more){const tail=text('div','Loading more posts…','feed-tail');tail.setAttribute('role','status');main.append(tail);feedObserver.observe(tail);}else if(state.feed.length)main.append(text('p',state.settings.nsfwMode==='hide'&&state.feed.some(C.isNSFW)&&state.feed.every(p=>C.isNSFW(p)||isBlocked(p.author))?'NSFW posts are hidden. No posts to show.':'You’re caught up.','feed-tail'));}
+  async function loadFeed(append,node,forcePins=false){if(append&&feedBusy)return;const seq=state.sequence,load=++feedLoad,owner=accountContext(),community=state.community,sort=state.sort,current=()=>seq===state.sequence&&state.page==='feed'&&load===feedLoad&&owner.current();feedBusy=true;if(node)node.disabled=true;try{
+      const request=C.feedRequest(owner.site,community,sort,state.topRange||'day',append?(state.feedCursor||state.feed.at(-1)?.uuid||''):'');
+      const result=await api(request.path,request.params,'GET',owner.user,owner.site);if(!current())return;
+      const pins=await feedPins(owner,community,sort,result,forcePins,current,append);if(!current()||!pins)return;
+      const incoming=result.data.posts||[];state.feedCursor=incoming.at(-1)?.uuid||state.feedCursor||'';state.pinWarning=pins.warning;
+      const flags=new Map(incoming.map(p=>[String(p.id),p.is_stickied]));for(const p of state.feed)if(typeof flags.get(String(p.id))==='boolean'&&p.is_stickied!==flags.get(String(p.id))){p.is_stickied=flags.get(String(p.id));main.querySelector('[data-post-id="'+p.id+'"] .author-identity')?.replaceWith(authorIdentity(p));}
+      const merged=C.mergePosts(append?state.feed:[],incoming);state.feed=C.mergePinned(pins.posts,merged.posts);
       state.more=!!result.data.has_more_entries&&merged.added.length>0;state.feedCached=result.cached?result:append?state.feedCached:null;
-      if(append){main.querySelector('.feed-tail')?.remove();const fragment=document.createDocumentFragment();if(result.cached)fragment.append(cachedNotice(result));for(const p of merged.added)fragment.append(postCard(p));main.append(fragment);}
-      else{replace(main,feedToolbar(),cachedNotice(result),...state.feed.map(p=>postCard(p)));if(!state.feed.length){main.append(text('p',state.site===C.SCORED&&C.scoredFeedView(state.community)==='home'?'No posts in your Home feed.':'No posts found.','empty'));if(state.site===C.SCORED&&C.scoredFeedView(state.community)==='home')main.append(button('Browse communities',()=>navigate('communities'),'browse-communities'));}window.scrollTo(0,0);}
+      if(append){main.querySelector('.feed-tail')?.remove();main.querySelector('.pin-notice')?.remove();const notice=pinNotice();if(notice)main.insertBefore(notice,main.children[1]||null);if(result.cached)main.insertBefore(cachedNotice(result),main.children[1]||null);const cards=new Map([...main.querySelectorAll('[data-post-id]')].map(n=>[n.dataset.postId,n])),header=[...main.children].filter(n=>!n.matches('.post,.blocked-post,.feed-tail'));reconcile(main,[...header,...state.feed.map(p=>cards.get(String(p.id))||postCard(p))]);}
+      else{replace(main,feedToolbar(),pinNotice(),cachedNotice(result),...state.feed.map(p=>postCard(p)));if(!state.feed.length){main.append(text('p',state.site===C.SCORED&&C.scoredFeedView(state.community)==='home'?'No posts in your Home feed.':'No posts found.','empty'));if(state.site===C.SCORED&&C.scoredFeedView(state.community)==='home')main.append(button('Browse communities',()=>navigate('communities'),'browse-communities'));}window.scrollTo(0,0);}
       addMore();
-      if(state.settings.preload&&!state.metered)state.feed.slice(0,6).forEach(p=>{const m=C.media(p);if(m.kind==='image'){const image=new Image();image.referrerPolicy='no-referrer';image.src=m.url;}});
+      if(state.settings.preload&&!state.metered)state.feed.filter(p=>!C.isNSFW(p)||state.settings.nsfwMode==='show'||state.settings.nsfwMode==='blur'&&!nsfwConcealed(p)).slice(0,6).forEach(p=>{const m=C.media(p);if(m.kind==='image'){const image=new Image();image.referrerPolicy='no-referrer';image.src=m.url;}});
     }catch(e){if(seq===state.sequence&&load===feedLoad){if(append&&state.feed.length){const tail=node?.isConnected?node:el('div',{class:'feed-tail'});replace(tail,text('p',e.message),button('Retry loading posts',()=>loadFeed(true,tail)));if(!tail.isConnected)main.append(tail);}else failure(e,()=>loadFeed(false));}}finally{if(load===feedLoad)feedBusy=false;if(node?.isConnected)node.disabled=false;}}
   function scrollToComments(){const area=$('#comments');if(!area)return;area.scrollIntoView({block:'start'});area.focus({preventScroll:true});}
   async function threadPage(post){
@@ -740,6 +800,7 @@
     while(parent.children.length>children.length){const old=parent.lastElementChild;releaseMedia(old);old.remove();}
   }
   function renderThread(model,commentsOnly=false){if(!currentThread(model))return;
+    if(nsfwConcealed(model.post)){replyCleanup?.();replyCleanup=null;model.commentNodes?.clear();model.replyStates?.clear();model.area=null;replace(main,cachedNotice(model.result),postCard(model.post,true));return;}
     model.replyStates??=new Map();model.commentNodes??=new Map();model.replyActive??=0;
     const p=model.post,groups=new Map(),ids=new Set(model.comments.map(c=>Number(c.id)));
     for(const c of model.comments){const parent=Number(c.comment_parent_id||0);if(!groups.has(parent))groups.set(parent,[]);groups.get(parent).push(c);}
@@ -751,7 +812,7 @@
       const expanded=!model.collapsed.has(String(c.id)),node=el('article',{class:'comment','aria-expanded':String(expanded),'data-comment-id':c.id,tabindex:'-1'});
       const parts=[];
       if(c.is_shown===false&&!c.is_deleted&&!c.is_removed){node.classList.add('comment-placeholder');return {node,parts,replies:el('div'),loader:el('div',{class:'reply-loader',role:'status'})};}
-      const head=el('div',{class:'comment-head'},authorLink(c.author));
+      const head=el('div',{class:'comment-head'},authorIdentity(c));
       const collapse=button('',()=>{const open=node.getAttribute('aria-expanded')!=='true';node.setAttribute('aria-expanded',String(open));collapse.setAttribute('aria-expanded',String(open));collapse.setAttribute('aria-label',open?'Collapse thread':'Expand thread');if(open)model.collapsed.delete(String(c.id));else model.collapsed.add(String(c.id));},'comment-collapse');
       collapse.setAttribute('aria-expanded',String(expanded));collapse.setAttribute('aria-label',expanded?'Collapse thread':'Expand thread');collapse.append(text('span',ago(c.created)),icon('chevron'));head.append(collapse);parts.push(head);
       if(c.author_flair_text)parts.push(el('span',{class:'flair',title:'User flair'},C.cleanFlair(c.author_flair_text)));
@@ -799,20 +860,40 @@
     model.pumpReplies=pump;document.addEventListener('visibilitychange',pump);
     replyCleanup=()=>{stopped=true;observer.disconnect();observed.clear();queue.clear();cancelAnimationFrame(frame);document.removeEventListener('visibilitychange',pump);if(model.pumpReplies===pump){model.pumpReplies=null;model.replyWatcher=null;}};
   }
+  const replyWrites=new Set();
   function replyTo(post,parent){
     if(!state.username){toast('Sign in to reply.');return;}
     const owner=accountContext(),page=state.sequence,key=ownKey(`reply:${post.id}:${parent}`,owner.user),input=el('textarea',{'aria-label':'Comment',placeholder:'Write your reply…'});
+    const journalKey=ownKey(`replyAttempt:${post.id}:${parent}`,owner.user),attempt=readLocal(journalKey,null);
+    if(attempt){
+      const box=el('div',{},text('p',replyWrites.has(journalKey)?'This reply is still sending. Wait for it to finish.':'The previous reply may already be posted. Check the discussion before sending another copy.'));
+      box.append(button('Check discussion',()=>{if(!owner.current())return;closeSheet();openPost(post,'comments');}));
+      if(!replyWrites.has(journalKey))box.append(button('Checked discussion — allow another send',e=>action(async()=>{if(!owner.current()||replyWrites.has(journalKey))throw new Error('Reopen this reply under its original account.');if(readLocal(key,null)===null&&typeof attempt.content==='string')durable(key,attempt.content);durable(journalKey,null);if(ownsSheet(token)){closeSheet();replyTo(post,parent);}},e.currentTarget)));
+      const token=sheet('Check the previous reply',box);return;
+    }
     input.value=readLocal(key,'');input.oninput=()=>remember(key,input.value);
     let token;
+    const sendStatus=el('p',{class:'reply-send-status media-error',role:'alert',hidden:true});
+    const checkDiscussion=button('Check discussion',()=>{if(!owner.current()||page!==state.sequence||!ownsSheet(token))return;closeSheet();openPost(post,'comments');},'secondary');checkDiscussion.hidden=true;
+    const showSendError=error=>{if(!owner.current()||page!==state.sequence||!ownsSheet(token))return;sendStatus.hidden=false;sendStatus.textContent=error.message;checkDiscussion.hidden=!readLocal(journalKey,null);};
     const send=button('Post reply',e=>action(async()=>{
+      try{
       if(!input.value.trim())throw new Error('Write a reply first.');if(!owner.current())throw new Error('Your account changed. Reopen the reply.');
-      const value=input.value,revision=store.revision(key);
-      await api('/api/v2/action/create_comment',{community:post.community,parentId:post.id,commentParentId:parent,content:value},'POST',owner.user,owner.site);
-      clearRevision(key,revision);
+      if(replyWrites.has(journalKey)||readLocal(journalKey,null))throw new Error('Check the previous reply before sending again.');
+      const value=input.value,revision=store.revision(key),params={community:post.community,parentId:post.id,commentParentId:parent,content:value};
+      if(JSON.stringify(params).length>1024*1024-1024)throw new Error('This reply is too large. Reduce its size before sending.');
+      const journal={stage:'sending',site:owner.site,postId:post.id,parent,content:value,draftRevision:revision,at:Date.now()};
+      try{durable(journalKey,journal);}
+      catch(error){remember(journalKey,null);throw error;} // No request was sent; local persistence failure remains retryable.
+      replyWrites.add(journalKey);
+      try{await api('/api/v2/action/create_comment',params,'POST',owner.user,owner.site);if(store.revision(key)===revision)durable(key,null);durable(journalKey,null);}
+      catch(error){remember(journalKey,{...journal,stage:'uncertain'});throw new Error(error.message+' Check the discussion before sending this reply again.');}
+      finally{replyWrites.delete(journalKey);}
       if(owner.current()){toast('Reply posted.');if(ownsSheet(token)&&page===state.sequence){closeSheet();const position={scroll:scrollY,anchor:scrollAnchor()};state.returning=true;await threadPage(post);if(page===state.sequence)restoreScroll(position,page);}}
+      }catch(error){showSendError(error);}
     },e.currentTarget),'primary');
     const status=text('p','','muted');status.dataset.draftKey=key;status.dataset.savedLabel='Draft saved on this device.';
-    token=sheet('Reply',el('div',{},input,status,el('div',{class:'dialog-actions'},send)));storageStatus();
+    token=sheet('Reply',el('div',{},input,status,sendStatus,el('div',{class:'dialog-actions'},send,checkDiscussion)));storageStatus();
   }
   async function flairPicker(community,current,onSelect){
     const token=sheet('Choose post flair',text('p','Loading flairs…','muted'),'flair');
@@ -966,7 +1047,8 @@
     const seq=state.sequence;
     function run(fresh){activeListCleanup?.();const query=input.value.trim();state.query=query;const generation=++searchGeneration;if(!query){state.searchModel=null;replace(results);return;}
       if(fresh||!state.searchModel||state.searchModel.query!==query)state.searchModel={query,posts:[],page:0,more:true};
-      return pagedPosts(results,'/api/v2/post/search.json',{community:state.community,query,sort:'new'},state.searchModel,()=>seq===state.sequence&&generation===searchGeneration);
+      const request=C.searchRequest(state.site,state.community,query);
+      return pagedPosts(results,request.path,request.params,state.searchModel,()=>seq===state.sequence&&generation===searchGeneration);
     }
     form.onsubmit=e=>{e.preventDefault();run(true);};if(state.searchModel&&state.searchModel.query===state.query)return run(false);
   }
@@ -1037,9 +1119,10 @@
     about.append(text('span','About'),el('span',{class:'about-version'},state.appVersion?'v'+state.appVersion:'',icon('chevron')));box.append(about);
     const help=button('',()=>action(()=>rpc('external',{url:'https://help.scored.co/'})),'setting about-setting help-setting');
     help.append(text('span','Help & support'),el('span',{class:'about-version'},icon('chevron')));box.append(help);
-    function selectSetting(label,key,options,help){const value=options.find(([v])=>String(v)===String(state.settings[key]))?.[1]||state.settings[key];const choose=button('',e=>choices(label,options,state.settings[key],selection=>action(async()=>{const seq=state.sequence;state.settings[key]=key==='textSize'||key==='cacheMb'?Number(selection):selection;await saveSettings();if(seq===state.sequence&&state.page==='settings')settingsPage();}),e.currentTarget),'setting-choice');choose.setAttribute('aria-label',label+': '+value);choose.append(text('span',value),icon('chevron'));box.append(el('div',{class:'setting'},el('div',{class:'setting-line'},text('span',label),choose),help?text('small',help):null));}
+    function selectSetting(label,key,options,help){const value=options.find(([v])=>String(v)===String(state.settings[key]))?.[1]||state.settings[key];const choose=button('',e=>choices(label,options,state.settings[key],selection=>action(async()=>{const seq=state.sequence;state.settings[key]=key==='textSize'||key==='cacheMb'?Number(selection):selection;if(key==='nsfwMode')nsfwRevealed.clear();await saveSettings();if(seq===state.sequence&&state.page==='settings')settingsPage();}),e.currentTarget),'setting-choice');choose.setAttribute('aria-label',label+': '+value);choose.append(text('span',value),icon('chevron'));box.append(el('div',{class:'setting'},el('div',{class:'setting-line'},text('span',label),choose),help?text('small',help):null));}
     function toggle(label,key,help){const id='setting-'+key,input=el('input',{type:'checkbox',role:'switch',class:'setting-switch',id,checked:state.settings[key]});input.onchange=()=>action(async()=>{state.settings[key]=input.checked;await saveSettings();});box.append(el('div',{class:'setting toggle'},el('label',{for:id},label,help?text('small',help):null),input));}
     selectSetting('Appearance','theme',[['dark','Dark'],['light','Light'],['system','Follow system']]);selectSetting('Text size','textSize',[[15,'Small'],[17,'Standard'],[20,'Large'],[24,'Extra large']]);selectSetting('Feed layout','layout',[['compact','Compact'],['cards','Image cards']]);
+    selectSetting('NSFW posts','nsfwMode',[['show','Show everything'],['blur','Blur NSFW'],['hide','Hide NSFW']],'Show all posts, blur flagged previews, or hide flagged posts.');
     toggle('Plain, readable flair','plainFlair','Full labels always remain visible.');toggle('Show website ads','showAds','Off by default. Applies to the website view; the reader contains no ad placements.');
     toggle('Autoplay video on unmetered connections','autoplay','Off by default. Uses your last volume and mute setting.');toggle('Preload nearby images on unmetered connections','preload','Never preloads videos.');toggle('New downloads only on unmetered connections','wifiDownloads','Applies to new transfers. Existing downloads keep their original network policy.');
     selectSetting('Reader cache limit','cacheMb',[[16,'16 MB'],[64,'64 MB'],[128,'128 MB'],[256,'256 MB']],'Limits cached posts and image previews; these expire after seven days. Saved files and drafts are separate.');
@@ -1064,7 +1147,7 @@
     }catch{return '';}
   }
   async function downloadsPage(){
-    const seq=state.sequence,rows=new Map();let busy=false,active=true,refreshQueued=false,retryFailedRequested=false,failures=0,operation=null,operationError='';
+    const seq=state.sequence,rows=new Map();let busy=false,active=true,refreshQueued=false,retryFailedRequested=false,validateCompletedRequested=true,failures=0,operation=null,operationError='';
     const alive=()=>active&&seq===state.sequence&&state.page==='downloads';
     const feedback=text('p','','muted download-refresh-status');feedback.setAttribute('role','status');
     const operationPanel=el('section',{class:'file-operation notice',hidden:true,role:'status'});
@@ -1109,12 +1192,13 @@
     const listContainer=el('div'),emptyMessage=text('p','Save an image, video or sound to find it here.','empty');
     replace(main,el('section',{},el('div',{class:'section'},el('div',{class:'download-heading'},text('h1','Your downloads'),refreshButton),text('p','Saved on this device. Tap a picture to zoom.','muted'),feedback),operationPanel,listContainer,emptyMessage));
     function scheduleRefresh(delay){if(!alive()||document.hidden)return;clearTimeout(downloadTimer);downloadTimer=setTimeout(()=>{downloadTimer=null;refresh();},delay);}
-    function requestRefresh(retryPreview=false){retryFailedRequested=retryFailedRequested||retryPreview;return refresh();}
+    function requestRefresh(retryPreview=false){retryFailedRequested=retryFailedRequested||retryPreview;validateCompletedRequested=true;return refresh();}
     async function refresh(){
       if(!alive())return;if(document.hidden||busy){refreshQueued=true;return;}
       busy=true;refreshQueued=false;clearTimeout(downloadTimer);downloadTimer=null;refreshButton.disabled=true;
       try{
-        const [list,fileState]=await Promise.all([rpc('downloads'),rpc('fileOperationStatus').catch(error=>({error:error.message}))]);if(!alive())return;
+        const validateCompleted=validateCompletedRequested;validateCompletedRequested=false;
+        const [list,fileState]=await Promise.all([rpc('downloads',{validateCompleted}),rpc('fileOperationStatus').catch(error=>({error:error.message}))]);if(!alive())return;
         failures=0;feedback.textContent='';const retryFailed=retryFailedRequested;retryFailedRequested=false;
         if(fileState.error)operationError='Could not check file operations. '+fileState.error;else{operation=fileState.operation||null;operationError='';}renderOperation();
         emptyMessage.hidden=list.length>0;const ids=new Set(list.map(item=>String(item.id)));
@@ -1140,7 +1224,7 @@
         }
         if((list.some(item=>[1,2,4].includes(item.status))||operation||operationError)&&!document.hidden)scheduleRefresh(2000);
       }catch(error){
-        if(alive()){failures++;feedback.textContent='Could not refresh downloads. Retrying automatically. '+error.message;scheduleRefresh(Math.min(30000,2000*2**Math.min(failures-1,4)));}
+        if(alive()){validateCompletedRequested=true;failures++;feedback.textContent='Could not refresh downloads. Retrying automatically. '+error.message;scheduleRefresh(Math.min(30000,2000*2**Math.min(failures-1,4)));}
       }finally{
         busy=false;if(alive()){refreshButton.disabled=false;if(refreshQueued&&!document.hidden){refreshQueued=false;scheduleRefresh(0);}}
       }

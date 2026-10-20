@@ -188,7 +188,7 @@ public final class MainActivity extends Activity {
         JSONObject account=vault.read(site);ConnectivityManager cm=(ConnectivityManager)getSystemService(CONNECTIVITY_SERVICE);
         return new JSONObject().put("site",site).put("settings",settings()).put("appVersion",getPackageManager().getPackageInfo(getPackageName(),0).versionName).put("username",account.optString("username",""))
             .put("sessionNeedsReset",vault.needsReset(site)).put("notice",getSharedPreferences("operations",0).getString("notice",""))
-            .put("metered",cm.isActiveNetworkMetered()).put("cacheBytes",cache.size()).put("downloads",downloads())
+            .put("metered",cm.isActiveNetworkMetered()).put("cacheBytes",cache.size())
             .put("systemDark",(getResources().getConfiguration().uiMode&Configuration.UI_MODE_NIGHT_MASK)==Configuration.UI_MODE_NIGHT_YES);
     }
     private void dispatch(String text){
@@ -238,7 +238,7 @@ public final class MainActivity extends Activity {
 
                     case "logout":vault.clear(site);main.post(()->{clearSiteBrowser(Policy.SITE);clearSiteBrowser("https://www.patriots.win");clearSiteBrowser(Policy.SCORED);clearSiteBrowser("https://www.scored.co");});result=new JSONObject();break;
                     case "download":result=download(a);break;
-                    case "downloads":result=downloads();break;
+                    case "downloads":result=downloadsStore().list(a.optBoolean("validateCompleted",true));break;
                     case "cancelDownload":cancelDownload(a.getLong("downloadId"));result=downloads();break;
                     case "retryDownloadPublication":downloadsStore().retryPublication(a.getLong("downloadId"));result=downloads();break;
                     case "uploadResults":result=uploadResults.list();break;

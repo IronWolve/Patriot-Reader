@@ -5,7 +5,8 @@
 !/screenshots/
 /screenshots/*
 !/screenshots/x-video.png
-!/screenshots/post-flair.png
+!/screenshots/scored-communities.png
+!/screenshots/scored-feed.png
 !/app/
 /app/*
 !/app/src/
@@ -28,6 +29,7 @@
 /app/src/main/java/app/patriotreader/*
 !/app/src/main/java/app/patriotreader/ApiClient.java
 !/app/src/main/java/app/patriotreader/CacheStore.java
+!/app/src/main/java/app/patriotreader/CompletedDownloadCache.java
 !/app/src/main/java/app/patriotreader/MainActivity.java
 !/app/src/main/java/app/patriotreader/Policy.java
 !/app/src/main/java/app/patriotreader/Vault.java
