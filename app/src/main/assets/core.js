@@ -57,6 +57,18 @@
     return {kind:'link',url};
   }
   const PATRIOTS='https://patriots.win',SCORED='https://scored.co';
+  function scoredFeedView(community){const name=String(community).toLowerCase();return name==='win'?'home':['home','trending','all'].includes(name)?name:'';}
+  function feedRequest(site,community,sort,range='day',from=''){
+    if(![PATRIOTS,SCORED].includes(site)||!['hot','new','active','rising','top'].includes(sort))throw new Error('Unsupported feed.');
+    // Home reads subscriptions; Trending/All are distinct aggregate modes.
+    const view=site===SCORED?scoredFeedView(community):'';
+    const params=view==='all'||view==='trending'
+      ?{community:'win',isTrendingTopics:true,trendingTopics:view==='trending'?'["Politics"]':'[]',blockedCommunities:'[]'}
+      :{community:view==='home'?'Home':community};
+    if(sort==='top')params.sort=range;
+    if(from)params.from=from;
+    return {path:`/api/v2/post/${sort}v2.json`,params};
+  }
   function siteOrigin(value){try{const u=new URL(safeURL(value));if(u.port&&u.port!=='443')return '';return ['patriots.win','www.patriots.win'].includes(u.hostname)?PATRIOTS:['scored.co','www.scored.co'].includes(u.hostname)?SCORED:'';}catch{return '';}}
   function postURL(post) { return `${siteOrigin(post.site)||PATRIOTS}/p/${encodeURIComponent(post.uuid || post.id)}/`; }
   function siteID(value) {
@@ -120,7 +132,7 @@
     }
     services.remember(null);return {post,pendingFlair:false};
   }
-  const api={PATRIOTS,SCORED,siteOrigin,defaults,createStore,cleanFlair,safeURL,owned,media,preview,youtubeID,truthID,rumbleURL,postURL,siteID,readerLink,commentURL,mergeComments,mergePosts,normalizeSettings,validateDraft,publish};
+  const api={PATRIOTS,SCORED,siteOrigin,scoredFeedView,feedRequest,defaults,createStore,cleanFlair,safeURL,owned,media,preview,youtubeID,truthID,rumbleURL,postURL,siteID,readerLink,commentURL,mergeComments,mergePosts,normalizeSettings,validateDraft,publish};
   if(typeof module!=='undefined' && module.exports)module.exports=api;
   root.ReaderCore=api;
 })(typeof globalThis!=='undefined'?globalThis:this);

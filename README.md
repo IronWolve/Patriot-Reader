@@ -6,7 +6,9 @@ I made this for my own use so I could stop using Firefox to browse patriots.win 
 
 ## Features
 
-- **The Donald and Scored communities** — use the title dropdown to switch feeds with your existing account. Community names open their feeds, and new Scored posts have a community selector.
+- **Patriots.win and all Scored.co communities** — use the title dropdown to switch between The Donald and Scored.co with your existing account. Open individual community feeds and choose a community when posting.
+- **Find and follow communities** — browse Subscribed, Recommended, or All, search for communities, and tap the stars to subscribe or unsubscribe.
+- **Home, Trending, and All feeds** — Home shows your subscribed communities. Switch feeds, sort by Hot, New, Active, Rising, or Top, and choose a time range for Top posts.
 - **Dark by default** — also supports light mode and your Android system theme.
 - **Readable post flair** — see flair on posts and choose it when creating a post on mobile.
 - **YouTube, X, and Rumble embeds** — supported videos play inside the reader. Open in X takes you directly to the installed X app, with an in-app browser fallback.

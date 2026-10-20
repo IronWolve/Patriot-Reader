@@ -19,14 +19,15 @@ public final class Policy {
     private static final Set<String> WRITES = new HashSet<>(Arrays.asList(
         "/api/v2/action/create_post", "/api/v2/action/create_comment", "/api/v2/action/vote",
         "/api/v2/post/set_flair", "/api/v2/post/delete_flair", "/api/v2/action/create_message",
-        "/api/v2/action/report", "/api/v2/action/block", "/api/v2/action/save", "/api/v2/action/unsave"));
+        "/api/v2/action/report", "/api/v2/action/block", "/api/v2/action/save", "/api/v2/action/unsave",
+        "/api/v2/community/subscribe", "/api/v2/community/unsubscribe"));
     private static final Set<String> READS = new HashSet<>(Arrays.asList(
         "/api/v2/post/hotv2.json", "/api/v2/post/newv2.json", "/api/v2/post/activev2.json",
         "/api/v2/post/risingv2.json", "/api/v2/post/topv2.json", "/api/v2/post/post.json",
         "/api/v2/post/search.json", "/api/v2/post/profile.json", "/api/v2/community/post_flairs.json",
         "/api/v2/user/about.json", "/api/v2/message/messages.json", "/api/v2/message/message.json", "/api/v2/upload/token.json",
         "/api/v2/comment/thread", "/api/v2/comment/profile.json", "/api/v2/content/profile.json",
-        "/api/v2/community/report_reasons", "/api/v2/community/communities.json", "/api/v2/community/search.json", "/api/v2/folder/get_folders.json", "/api/v2/folder/get_folder.json"));
+        "/api/v2/community/report_reasons", "/api/v2/community/communities.json", "/api/v2/community/community.json", "/api/v2/community/search.json", "/api/v2/folder/get_folders.json", "/api/v2/folder/get_folder.json"));
     public static boolean apiAllowed(String method, String path) {
         try {
             URI u = new URI(path);
